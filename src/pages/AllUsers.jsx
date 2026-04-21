@@ -4,7 +4,7 @@ import { fetchSystemsApi } from "../redux/api/systemsApi";
 import { fetchAttendanceSummaryApi } from "../redux/api/attendenceApi";
 import { Award, Target, ListTodo, Clock, CheckCircle2, Search, Filter, Download, ChevronDown, X, User, Activity, Timer } from "lucide-react";
 import searchIcon from "../assets/search-icon-logo.png";
-import { SCRIPT_URLS } from '../utils/envConfig';
+import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../utils/envConfig';
 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyBPTmVksbejNrOPNZNHYajQWWLbzA34hshoAPYig99hcqkYuiKy-j5pavsuqeFKIXNFg/exec";
 
@@ -349,7 +349,7 @@ const HomePage = () => {
                 const otherDevices = DEVICES.filter(d => d.name !== 'ALL DEVICES');
                 await Promise.all(otherDevices.map(async (dev) => {
                     try {
-                        const API_URL = `/api/device-logs?APIKey=211616032630&SerialNumber=${dev.serial}&DeviceName=${dev.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
+                        const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${dev.serial}&DeviceName=${dev.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
                         const res = await fetch(API_URL);
                         if (res.ok) {
                             const logs = await res.json();
@@ -365,7 +365,7 @@ const HomePage = () => {
                 }));
             } else {
                 try {
-                    const API_URL = `/api/device-logs?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
+                    const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
                     const res = await fetch(API_URL);
                     if (res.ok) {
                         const logs = await res.json();

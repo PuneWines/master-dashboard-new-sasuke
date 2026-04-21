@@ -5,7 +5,7 @@ import {
   ArrowUpRight, ArrowDownRight, CreditCard, Receipt,
   X, Printer, CheckCircle2, AlertCircle, Info, PlusCircle, RefreshCcw
 } from 'lucide-react';
-import { SCRIPT_URLS } from '../../utils/envConfig';
+import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
 
 const PayslipModal = ({ isOpen, onClose, record }) => {
   if (!isOpen || !record) return null;
@@ -337,7 +337,7 @@ const MySalary = () => {
       if (lookupId && !(selectedYear < 2026 || (selectedYear === 2026 && monthIndex < 4))) {
         await Promise.all(DEVICES.map(async (dev) => {
           try {
-            const apiRes = await fetch(`/api/device-logs?APIKey=211616032630&SerialNumber=${dev.serial}&DeviceName=${dev.apiName}&FromDate=${fromDate}&ToDate=${toDate}`);
+            const apiRes = await fetch(`${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${dev.serial}&DeviceName=${dev.apiName}&FromDate=${fromDate}&ToDate=${toDate}`);
             const rawLogs = await apiRes.json();
             if (Array.isArray(rawLogs)) {
               const dailyGrouped = {};

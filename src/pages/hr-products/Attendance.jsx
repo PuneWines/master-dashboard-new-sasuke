@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Download, Filter, ChevronDown, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { SCRIPT_URLS } from '../../utils/envConfig';
+import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
 
 const DEVICES = [
   { name: 'ALL DEVICES', serial: 'ALL', apiName: 'ALL' },
@@ -215,7 +215,7 @@ const Attendance = () => {
         const allResponses = await Promise.all(
           otherDevices.map(async (device) => {
             try {
-              const url = `/api/device-logs?APIKey=211616032630&SerialNumber=${device.serial}&DeviceName=${device.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
+              const url = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${device.serial}&DeviceName=${device.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
               const res = await fetch(url);
               if (!res.ok) return [];
               const contentType = res.headers.get('content-type');
@@ -231,7 +231,7 @@ const Attendance = () => {
         rawLogs = allResponses.flat();
         if (rawLogs.length === 0) throw new Error('No logs found for this period across any device.');
       } else {
-        const API_URL = `/api/device-logs?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
+        const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
         const response = await fetch(API_URL);
         if (!response.ok) throw new Error(`Device Server returned ${response.status}. It might be offline.`);
 

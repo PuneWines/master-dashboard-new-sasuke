@@ -5,7 +5,7 @@ import {
   User, Hash, Timer, Coffee, AlertCircle, FileText
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { SCRIPT_URLS } from '../../utils/envConfig';
+import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
 
 const DEVICES = [
   { name: 'BAWDHAN', apiName: 'BAVDHAN', serial: 'C26238441B1E342D' },
@@ -314,7 +314,7 @@ const MyAttendance = () => {
           const lastDayDate = new Date(queryYear, queryMonth, 0);
           const lastDay = `${queryYear}-${String(queryMonth).padStart(2, '0')}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
           
-          const BIO_URL = `/api/device-logs?APIKey=211616032630&SerialNumber=${serial}&DeviceName=${deviceApiName}&FromDate=${firstDay}&ToDate=${lastDay}`;
+          const BIO_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${serial}&DeviceName=${deviceApiName}&FromDate=${firstDay}&ToDate=${lastDay}`;
           const bioRes = await fetch(BIO_URL);
           if (bioRes.ok) {
             const rawLogs = await bioRes.json();

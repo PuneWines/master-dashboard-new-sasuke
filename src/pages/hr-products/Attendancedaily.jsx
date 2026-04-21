@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Download, Calendar, Loader2, CheckCircle, X, Clock, Pencil, CheckCircle2, XCircle, FileText } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
 
 const DEVICES = [
   { name: 'ALL DEVICES', serial: 'ALL', apiName: 'ALL' },
@@ -387,7 +388,7 @@ const Attendancedaily = () => {
         const allResponses = await Promise.all(
           otherDevices.map(async (device) => {
             try {
-              const url = `/api/device-logs?APIKey=211616032630&SerialNumber=${device.serial}&DeviceName=${device.apiName}&FromDate=${queryStart}&ToDate=${queryEnd}`;
+              const url = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${device.serial}&DeviceName=${device.apiName}&FromDate=${queryStart}&ToDate=${queryEnd}`;
               const res = await fetch(url);
               if (!res.ok) return [];
               const logs = await res.json();
@@ -401,7 +402,7 @@ const Attendancedaily = () => {
         );
         rawLogs = allResponses.flat();
       } else {
-        const API_URL = `/api/device-logs?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${queryStart}&ToDate=${queryEnd}`;
+        const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${queryStart}&ToDate=${queryEnd}`;
         const response = await fetch(API_URL);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();

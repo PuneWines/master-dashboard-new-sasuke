@@ -1,7 +1,7 @@
 import { toast } from 'react-hot-toast';
 import React, { useState, useEffect } from 'react';
 import { Search, Loader2, Download, Plus, X, Calendar, Save, Edit2 } from 'lucide-react';
-import { SCRIPT_URLS } from '../../utils/envConfig';
+import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
 
 const PAYROLL_SCRIPT_URL = SCRIPT_URLS.HR_PAYROLL;
 const JOINING_SCRIPT_URL = SCRIPT_URLS.HR_JOINING;
@@ -154,7 +154,7 @@ const Payroll = () => {
       if (!(selectedYear < 2026 || (selectedYear === 2026 && selectedMonth < 4))) {
         await Promise.all(DEVICES.map(async (dev) => {
           try {
-            const apiRes = await fetch(`/api/device-logs?APIKey=211616032630&SerialNumber=${dev.serial}&DeviceName=${dev.apiName}&FromDate=${fromDate}&ToDate=${toDate}`);
+            const apiRes = await fetch(`${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${dev.serial}&DeviceName=${dev.apiName}&FromDate=${fromDate}&ToDate=${toDate}`);
             const rawLogs = await apiRes.json();
             if (Array.isArray(rawLogs)) {
               const dailyGrouped = {};

@@ -26,7 +26,7 @@ import {
   Calendar,
   Loader2
 } from 'lucide-react';
-import { SCRIPT_URLS } from '../../utils/envConfig';
+import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
 
 const Dashboard = () => {
   const [totalEmployee, setTotalEmployee] = useState(0);
@@ -366,7 +366,7 @@ const Dashboard = () => {
         totalDaysInMonth = today.getDate();
       }
 
-      const API_URL = `/api/device-logs?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.name}&FromDate=${queryStart}&ToDate=${queryEnd}`;
+      const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.name}&FromDate=${queryStart}&ToDate=${queryEnd}`;
 
       const response = await fetch(API_URL);
       if (!response.ok) throw new Error('API failed');
