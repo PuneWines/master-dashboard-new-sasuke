@@ -13,6 +13,18 @@
         "destination": "https://script.google.com/macros/s/AKfycbxYJiNFW0EWEnOjqhph9gr8Wvmjgfvgo1ZxQ0E4FlJTj9Qxd3TFuARjR0Rz1DHvdbOc/exec"
       },
       {
+        "source": "/api/gas",
+        "destination": "https://script.google.com/macros/s/AKfycbxYJiNFW0EWEnOjqhph9gr8Wvmjgfvgo1ZxQ0E4FlJTj9Qxd3TFuARjR0Rz1DHvdbOc/exec"
+      },
+      {
+        "source": "/api/gas/:path*",
+        "destination": "https://script.google.com/macros/s/AKfycbxYJiNFW0EWEnOjqhph9gr8Wvmjgfvgo1ZxQ0E4FlJTj9Qxd3TFuARjR0Rz1DHvdbOc/exec"
+      },
+      {
+        "source": "/user-api",
+        "destination": "https://script.google.com/macros/s/AKfycbwzAs-q8ksIvwDrB7CMAYjr-f27gwkt_4hJM1Ia1lMPlh-PmJQkzlPCRLx5ifmE58uMjA/exec"
+      },
+      {
         "source": "/user-api/:path*",
         "destination": "https://script.google.com/macros/s/AKfycbwzAs-q8ksIvwDrB7CMAYjr-f27gwkt_4hJM1Ia1lMPlh-PmJQkzlPCRLx5ifmE58uMjA/exec"
       },
