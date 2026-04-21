@@ -75,7 +75,7 @@ export default defineConfig(({ mode }) => {
         },
         // 5. Device Logs Proxy
         '/api/device-logs': {
-          target: env.VITE_DEVICE_LOGS_API_URL,
+          target: 'http://103.195.203.77:15167',
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/device-logs/, '/api/v2/WebAPI/GetDeviceLogs')
         },
