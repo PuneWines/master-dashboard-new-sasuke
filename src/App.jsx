@@ -52,6 +52,12 @@ import { CrossCheckPage as PurchaseCrossCheck } from "./pages/purchase_managemen
 // ── Petty Cash Pages ──
 import PettyCashApp from "./pages/petty-cash/App";
 
+// ── Index Systems Pages ──
+import { IndexProvider } from "./context/IndexContext";
+import IndexLayout from "./components/index_systems/Layout";
+import IndexDashboard from "./pages/index_systems/IndexDashboard";
+import CreateIndex from "./pages/index_systems/CreateIndex";
+
 // ── HR Pages ──
 import AfterJoiningWork from "./pages/hr-products/AfterJoiningWork";
 import AfterLeavingWork from "./pages/hr-products/AfterLeavingWork";
@@ -376,6 +382,26 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* ════════════════════════════════════════
+              INDEX SYSTEMS APP
+              System tracking and management with sidebar
+          ════════════════════════════════════════ */}
+          <Route
+            path="/index_systems"
+            element={
+              <ProtectedRoute>
+                <AdminLayout>
+                  <IndexProvider>
+                    <IndexLayout />
+                  </IndexProvider>
+                </AdminLayout>
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<IndexDashboard />} />
+            <Route path="create" element={<CreateIndex />} />
+          </Route>
 
           {/* Admin Settings Route */}
           <Route

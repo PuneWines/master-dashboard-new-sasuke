@@ -11,6 +11,7 @@ let HARDCODED_SYSTEMS = [
     { id: 4, systems: "Purchase App", link: "/purchase_management" },
     { id: 5, systems: "Document Manager", link: "/document_manager" },
     { id: 6, systems: "HR Product", link: "/hr_product" },
+    { id: 7, systems: "Index System", link: "/index_systems" },
 ];
 
 /**
