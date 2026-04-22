@@ -31,12 +31,41 @@ const HomePage = () => {
     const [taskStats, setTaskStats] = useState({ completed: 0, pending: 0, overdue: 0, total: 0 });
     const [taskDeptFilter, setTaskDeptFilter] = useState("All");
     const [availableTaskDepts, setAvailableTaskDepts] = useState(["All"]);
+    const [taskEmployeeFilter, setTaskEmployeeFilter] = useState("All");
+    const [availableTaskEmployees, setAvailableTaskEmployees] = useState(["All"]);
 
     // Detailed Biometric Attendance State
     const [biometricAttendance, setBiometricAttendance] = useState([]);
     const [loadingBiometric, setLoadingBiometric] = useState(false);
     const [selectedDevice, setSelectedDevice] = useState(DEVICES[0]);
     const [biometricStats, setBiometricStats] = useState(null);
+
+    // Update employee filter when department changes
+    useEffect(() => {
+        // Filter employees based on selected department
+        if (taskDeptFilter === "All") {
+            // Show all employees when "All" departments is selected
+            const employees = ["All", ...new Set(todaysTasks.map(t => t.assignedTo))];
+            setAvailableTaskEmployees(employees);
+        } else {
+            // Show only employees from selected department
+            const deptEmployees = ["All", 
+                ...new Set(
+                    todaysTasks
+                        .filter(t => t.department === taskDeptFilter)
+                        .map(t => t.assignedTo)
+                )
+            ];
+            setAvailableTaskEmployees(deptEmployees);
+        }
+        // Reset employee filter to "All" when department changes
+        setTaskEmployeeFilter("All");
+        
+        console.log("Department changed to:", taskDeptFilter);
+        console.log("Available employees:", todaysTasks
+            .filter(t => taskDeptFilter === "All" || t.department === taskDeptFilter)
+            .map(t => t.assignedTo));
+    }, [taskDeptFilter, todaysTasks]);
 
     // Date/Data utility functions copied from Checklist Dashboard logic
     const formatDateToDDMMYYYY = (date) => {
@@ -173,8 +202,9 @@ const HomePage = () => {
                 .filter(d => d && d !== "Select Department" && d !== "DELEGATION" && d !== "MASTER");
 
             console.log("Fetching tasks for departments:", accessibleDepartments);
+            console.log("Current user:", username, "Role:", userRole, "Is Admin:", isAdmin);
 
-            // 5. Fetch tasks for each accessible department
+            // 5. Fetch tasks for each accessible department (same logic as shop data pages)
             const today = new Date();
             today.setHours(0, 0, 0, 0);
             const todayTime = today.getTime();
@@ -194,8 +224,13 @@ const HomePage = () => {
                         if (!c) continue;
 
                         const assignedTo = c[4]?.v || "Unassigned";
-                        // Removed: individual assignedTo check to allow department-wide visibility for employees
-                        // if (!isAdmin && assignedTo.toLowerCase().trim() !== usernameLower) continue;
+                        
+                        // Filter tasks: Admin sees all tasks, regular users see only their assigned tasks
+                        if (!isAdmin && assignedTo.toLowerCase().trim() !== usernameLower) continue;
+
+                        // Skip tasks marked as "DONE" in status column (column M - index 12)
+                        const statusColumn = c[12]?.v;
+                        if (statusColumn && statusColumn.toString().trim() === "DONE") continue;
 
                         const taskDateStr = parseGoogleSheetsDate(c[6]?.v);
                         const taskDate = parseDateFromDDMMYYYY(taskDateStr);
@@ -241,6 +276,10 @@ const HomePage = () => {
             // Extract unique departments for filtering
             const depts = ["All", ...new Set(allAccTasks.map(t => t.department))];
             setAvailableTaskDepts(depts);
+
+            // Extract unique employee names for filtering
+            const employees = ["All", ...new Set(allAccTasks.map(t => t.assignedTo))];
+            setAvailableTaskEmployees(employees);
 
             setTaskStats(stats);
         } catch (error) {
@@ -710,7 +749,10 @@ const HomePage = () => {
                                     <div className="flex items-center gap-3">
                                         <h3 className="text-xl font-bold text-gray-800">Today's Tasks</h3>
                                         <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full border border-blue-200">
-                                            {todaysTasks.filter(t => taskDeptFilter === "All" || t.department === taskDeptFilter).length}
+                                            {todaysTasks.filter(t => 
+                                                (taskDeptFilter === "All" || t.department === taskDeptFilter) &&
+                                                (taskEmployeeFilter === "All" || t.assignedTo?.toLowerCase().trim() === taskEmployeeFilter?.toLowerCase().trim())
+                                            ).length}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -723,6 +765,15 @@ const HomePage = () => {
                                                 <option key={dept} value={dept}>{dept}</option>
                                             ))}
                                         </select>
+                                        <select
+                                            value={taskEmployeeFilter}
+                                            onChange={(e) => setTaskEmployeeFilter(e.target.value)}
+                                            className="text-xs font-bold border-none bg-green-50 text-green-600 rounded-lg px-2 py-1 outline-none cursor-pointer max-w-[120px]"
+                                        >
+                                            {availableTaskEmployees.map(emp => (
+                                                <option key={emp} value={emp}>{emp}</option>
+                                            ))}
+                                        </select>
                                         <ListTodo className="text-blue-500 h-6 w-6" />
                                     </div>
                                 </div>
@@ -732,10 +783,16 @@ const HomePage = () => {
                                             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
                                             <p className="text-gray-500 text-sm animate-pulse">Fetching your tasks...</p>
                                         </div>
-                                    ) : todaysTasks.filter(t => taskDeptFilter === "All" || t.department === taskDeptFilter).length > 0 ? (
+                                    ) : todaysTasks.filter(t => 
+                                        (taskDeptFilter === "All" || t.department === taskDeptFilter) &&
+                                        (taskEmployeeFilter === "All" || t.assignedTo?.toLowerCase().trim() === taskEmployeeFilter?.toLowerCase().trim())
+                                    ).length > 0 ? (
                                         <div className="space-y-3 w-full">
                                             {todaysTasks
-                                                .filter(t => taskDeptFilter === "All" || t.department === taskDeptFilter)
+                                                .filter(t => 
+                                                    (taskDeptFilter === "All" || t.department === taskDeptFilter) &&
+                                                    (taskEmployeeFilter === "All" || t.assignedTo?.toLowerCase().trim() === taskEmployeeFilter?.toLowerCase().trim())
+                                                )
                                                 .map((task, idx) => (
                                                     <div key={idx} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl border border-gray-100 group hover:border-blue-200 hover:bg-blue-50 transition-all">
                                                         <div className="flex items-center gap-3">
@@ -746,6 +803,8 @@ const HomePage = () => {
                                                                 <p className="font-bold text-gray-800 text-sm line-clamp-1">{task.title}</p>
                                                                 <div className="flex items-center gap-2 mt-0.5">
                                                                     <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{task.department}</span>
+                                                                    <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                                                                    <span className="text-[10px] font-bold text-green-600">{task.assignedTo}</span>
                                                                     <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
                                                                     <span className="text-[10px] font-bold text-blue-500">{task.date}</span>
                                                                 </div>

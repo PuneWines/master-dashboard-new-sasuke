@@ -21,8 +21,8 @@ const MASTER_MAP_URL = 'https://script.google.com/macros/s/AKfycbyGp3onARkG7QfXK
 const Attendancedaily = () => {
   const todayDate = new Date().toISOString().split('T')[0];
   const [searchTerm, setSearchTerm] = useState('');
-  const [startDate, setStartDate] = useState('2026-04-01');
-  const [endDate, setEndDate] = useState('2026-04-30');
+  const [startDate, setStartDate] = useState(todayDate);
+  const [endDate, setEndDate] = useState(todayDate);
   const [selectedDevice, setSelectedDevice] = useState(DEVICES[0]);
   const [attendanceData, setAttendanceData] = useState([]);
   const [rawLogs, setRawLogs] = useState([]);
@@ -561,10 +561,7 @@ const Attendancedaily = () => {
           }
         } else {
           // Both punches present
-          if (netWorkHours < 8 && !isToday) {
-            status = 'ABSENT';
-            statusReason = `Working hours less than 8 hours (Net: ${netWorkHours.toFixed(2)} hrs)`;
-          } else if (lateMins > 0) {
+          if (lateMins > 0) {
             status = 'LET';
             statusReason = `Late arrival: ${lateMins} min`;
           } else {

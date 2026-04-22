@@ -1,12 +1,7 @@
-import { toast } from 'react-hot-toast';
 import React, { useState, useEffect } from 'react';
 import { Search, Loader2, Download, Plus, X, Calendar, Save, Edit2 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
 import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
-
-const PAYROLL_SCRIPT_URL = SCRIPT_URLS.HR_PAYROLL;
-const JOINING_SCRIPT_URL = SCRIPT_URLS.HR_JOINING;
-
-
 
 const DEVICES = [
   { name: 'BAWDHAN', apiName: 'BAVDHAN', serial: 'C26238441B1E342D' },
@@ -16,6 +11,9 @@ const DEVICES = [
   { name: 'MUMBAI', apiName: 'MUMBAI', serial: 'C2630450C32A2327' }
 ];
 
+const PAYROLL_SCRIPT_URL = SCRIPT_URLS.HR_PAYROLL;
+const JOINING_SCRIPT_URL = SCRIPT_URLS.HR_JOINING;
+
 const Payroll = () => {
   const [activeTab, setActiveTab] = useState('salary');
   const [searchTerm, setSearchTerm] = useState('');
@@ -24,6 +22,7 @@ const Payroll = () => {
   const [salaryData, setSalaryData] = useState({ headers: [], rows: [] });
   const [payrollRowMap, setPayrollRowMap] = useState({}); // "EMPID_Month_Year" -> real sheet row number
   const [historyData, setHistoryData] = useState({ headers: [], rows: [] });
+  const [advanceInfoMap, setAdvanceInfoMap] = useState({}); // empId -> { pending, rowIndex }
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -41,21 +40,18 @@ const Payroll = () => {
     employeeName: '',
     year: new Date().getFullYear().toString(),
     month: new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date()),
-    basicSalary: '0',
-    lta: '0',
-    bonus: '0',
-    otherAllowance: '0',
-    overtime: '0',
-    pf: '0',
-    loan: '0',
-    otherDeduction: '0',
-    status: 'Draft',
+    designation: '',
+    joiningPlace: '',
+    dateOfJoining: '',
+    monthlySalary: '0',
+    extraAdvanceDeduction: '0',
+    fixAdvanceDeduction: '0',
+    advanceDeduction: '0',
+    brackage: '0',
+    medical: '0',
+    totalSalary: '0',       // New field for calculation result
     payDate: new Date().toISOString().split('T')[0]
   });
-
-
-
-
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '';
@@ -87,6 +83,30 @@ const Payroll = () => {
     return `${y}-${m}-${d}`;
   };
 
+  const formatDateToDMY = (dateStr) => {
+    if (!dateStr) return '';
+    try {
+      const parts = dateStr.toString().split(/[\/\-]/);
+      let date;
+      if (parts.length === 3) {
+        if (parts[0].length === 4) { // YYYY-MM-DD
+          date = new Date(parts[0], parts[1] - 1, parts[2]);
+        } else { // DD/MM/YYYY
+          date = new Date(parts[2], parts[1] - 1, parts[0]);
+        }
+      } else {
+        date = new Date(dateStr);
+      }
+      if (isNaN(date)) return dateStr;
+      const d = String(date.getDate()).padStart(2, '0');
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const y = date.getFullYear();
+      return `${d}/${m}/${y}`;
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
   const fetchPayrollData = async () => {
     setLoading(true);
     setError(null);
@@ -110,23 +130,14 @@ const Payroll = () => {
         jHeaders = jData.data[5];
         joiningRows = jData.data.slice(6);
       }
-      const getJIdx = (...aliases) => {
-        for (const alias of aliases) {
-          const idx = jHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === alias.toLowerCase());
-          if (idx !== -1) return idx;
-        }
-        return -1;
-      };
-
+      const getJIdx = (n) => jHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === n.toLowerCase());
       const joiningMeta = joiningRows.map(r => ({
-        id: r[getJIdx('Employee ID', 'Joining No')]?.toString().trim(),
-        name: r[getJIdx('Name As Per Aadhar', 'Candidate Name')]?.toString().trim(),
-        designation: r[getJIdx('Designation', 'Post', 'Role')]?.toString().trim(),
-        doj: r[getJIdx('Date of Joining', 'DOJ', 'Joining Date')]?.toString().trim(),
-        salary: r[getJIdx('Salary', 'Monthly Salary', 'CTC')]?.toString().trim()
+        id: r[getJIdx('Employee ID')]?.toString().trim(),
+        name: r[getJIdx('Name As Per Aadhar')]?.toString().trim(),
+        designation: r[getJIdx('Designation')]?.toString().trim()
       })).filter(h => h.id);
 
-      // 3. Fetch Master Mapping
+      // 3. Fetch Master Mapping (from JOINING script - for employee details)
       const MASTER_MAP_URL = `${JOINING_SCRIPT_URL}?sheet=MASTER&action=fetch`;
       const dmRes = await fetch(MASTER_MAP_URL);
       const dmData = await dmRes.json();
@@ -140,63 +151,144 @@ const Payroll = () => {
         }));
       }
 
+      // 3b. Fetch Monthly Salary + Designation from PAYROLL MASTER sheet
+      const masterSalaryMap = {};      // empId -> monthlySalary
+      const masterDesignationMap = {}; // empId -> designation
+      const masterDojMap = {};         // empId -> doj
+      try {
+        const salRes = await fetch(`${PAYROLL_SCRIPT_URL}?sheet=MASTER&action=fetch&spreadsheetId=1lg8cvRaYHpnR75bWxHoh-a30-gGL94-_WAnE7Zue6r8`);
+        const salData = await salRes.json();
+        if (salData.success && salData.data) {
+          const salRows = salData.data.slice(1); // skip header row
+          salRows.forEach(r => {
+            const empId = r[0]?.toString().trim(); // Column A = EMP ID
+            if (!empId) return;
+            const salary = r[5]; // Column F = Monthly Salary
+            const desig = r[2]; // Column C = Designation
+            const doj = r[4]; // Column E = DOJ
+            if (salary !== undefined && salary !== '') {
+              masterSalaryMap[empId] = Number(salary) || 0;
+            }
+            if (desig !== undefined && desig !== '') {
+              masterDesignationMap[empId] = desig.toString().trim();
+            }
+            if (doj !== undefined && doj !== '') {
+              masterDojMap[empId] = doj.toString().trim();
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Failed to load data from MASTER sheet:', e);
+      }
+
+      // 3c. Fetch ADVANCE sheet for Pending Amount condition
+      const advMap = {};
+      try {
+        const advRes = await fetch(`${PAYROLL_SCRIPT_URL}?sheet=ADVANCE&action=fetch&spreadsheetId=1lg8cvRaYHpnR75bWxHoh-a30-gGL94-_WAnE7Zue6r8`);
+        const advData = await advRes.json();
+        if (advData.success && advData.data) {
+          const advRows = advData.data.slice(1); // skip header
+          advRows.forEach((r, idx) => {
+            const empId = r[1]?.toString().trim(); 
+            const status = r[6]?.toString().toLowerCase().trim();
+            const pending = Number(r[11]) || 0; 
+            const apprMonthlyDeduction = Number(r[9]) || 0; 
+            const type = (r[7] || 'Advance').toString().trim();
+            
+            if (empId) {
+              if (!advMap[empId]) {
+                advMap[empId] = { 
+                  extra: { total: 0, pending: 0, deduction: 0 }, 
+                  fix: { total: 0, pending: 0, deduction: 0 }, 
+                  totalPending: 0 
+                };
+              }
+
+              // Status check: Process only Approved or Running advances
+              if ((status === 'approved' || status === 'running') && pending > 0) {
+                const totalTaken = Number(r[8]) || Number(r[3]) || 0;
+
+                if (type === 'Extra Advance') {
+                  advMap[empId].extra = {
+                    total: totalTaken,
+                    pending: pending,
+                    deduction: apprMonthlyDeduction,
+                    rowIndex: idx + 2
+                  };
+                } else if (type === 'Fix Advance' || type === 'Advance') {
+                  advMap[empId].fix = {
+                    total: totalTaken,
+                    pending: pending,
+                    deduction: apprMonthlyDeduction,
+                    rowIndex: idx + 2
+                  };
+                }
+                advMap[empId].totalPending = (advMap[empId].extra?.pending || 0) + (advMap[empId].fix?.pending || 0);
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.error('Failed to load data from ADVANCE sheet:', e);
+      }
+      setAdvanceInfoMap(advMap);
+
       // 4. Fetch Attendance for all devices
       const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
       const attendanceAgg = {}; // code -> totalPresent
-      
+      const globalDailyGrouped = {};
+      const logsAvailable = !(selectedYear < 2026 || (selectedYear === 2026 && selectedMonth < 4));
+
       const startDay = '01';
       const endDay = new Date(selectedYear, selectedMonth, 0).getDate();
       const paddedMonth = selectedMonth.toString().padStart(2, '0');
       let fromDate = `${selectedYear}-${paddedMonth}-${startDay}`;
       let toDate = `${selectedYear}-${paddedMonth}-${endDay}`;
 
-      // Only fetch logs if in 2026-04 onwards
-      if (!(selectedYear < 2026 || (selectedYear === 2026 && selectedMonth < 4))) {
+      if (logsAvailable) {
         await Promise.all(DEVICES.map(async (dev) => {
           try {
             const apiRes = await fetch(`${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${dev.serial}&DeviceName=${dev.apiName}&FromDate=${fromDate}&ToDate=${toDate}`);
             const rawLogs = await apiRes.json();
             if (Array.isArray(rawLogs)) {
-              const dailyGrouped = {};
               rawLogs.forEach(log => {
                 if (!log.EmployeeCode || !log.LogDate) return;
                 const dateKey = log.LogDate.split(' ')[0];
                 if (dateKey < '2026-04-01') return;
                 const key = `${log.EmployeeCode}_${dateKey}`;
-                dailyGrouped[key] = true;
-              });
-              Object.keys(dailyGrouped).forEach(key => {
-                const code = key.split('_')[0];
-                attendanceAgg[code] = (attendanceAgg[code] || 0) + 1;
+                globalDailyGrouped[key] = true;
               });
             }
-          } catch (e) { console.error(`Error fetching logs for ${dev.name}`, e); }
+          } catch (e) {
+            console.error(`Error fetching logs for ${dev.name}`, e);
+          }
         }));
+
+        Object.keys(globalDailyGrouped).forEach(key => {
+          const code = key.split('_')[0];
+          attendanceAgg[code] = (attendanceAgg[code] || 0) + 1;
+        });
       }
 
-      // 5. Merge Strategy
-      // If a row exists in spreadsheet for this Emp + Month + Year, use it.
-      // Otherwise, create "virtual" row for everyone in Master/Joining.
-      
       const monthStr = monthNames[selectedMonth - 1];
       const yearStr = selectedYear.toString();
 
-      // Ensure specific columns are present in headers
       const requiredHeaders = [
-        'EMP ID', 'Name of the Employee', 'Year', 'Month', 
-        'Designation', 'Location', 'DOJ', 'Monthly Salary', 
-        'Days in a Month', 'Mgmt Adjustment', 'Total Present', 
-        'Advance Deduction', 'Brackage', 'Medical', 'Total Salary', 'Pay Date'
+        'S.N', 'EMP ID', 'Name of the Employee', 'DOJ', 'Year', 'Month', 
+        'Designation', 'Location', 'Monthly Salary', 'Days in a Month', 
+        'Mgmt Adjustment', 'Total Present', 'Fix Pending', 'Fix Advance Deduction', 
+        'Extra Pending', 'Extra Advance Deduction', 'Brackage', 'Medical', 
+        'Total Salary', 'New payroll Date'
       ];
       const finalHeaders = [...spreadsheetHeaders];
       requiredHeaders.forEach(rh => {
-          if (finalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === rh.toLowerCase()) === -1) {
-              finalHeaders.push(rh);
-          }
+        if (finalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === rh.toLowerCase()) === -1) {
+          finalHeaders.push(rh);
+        }
       });
 
       const getIdx = (n) => finalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === n.toLowerCase());
-      
+
       const empIdIdx = getIdx('EMP ID');
       const nameIdx = getIdx('Name of the Employee');
       const yearIdx = getIdx('Year');
@@ -205,7 +297,6 @@ const Payroll = () => {
       const locIdx = getIdx('Location');
       const presentIdx = getIdx('Total Present');
 
-      // Index of spreadsheet data for quick lookup
       const spreadsheetMap = {};
       const rowNumberMap = {}; // key -> real sheet row number (1-based)
       const ssEmpIdIdx = spreadsheetHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === 'emp id');
@@ -218,91 +309,197 @@ const Payroll = () => {
         if (id && m && y) {
           const key = `${id}_${m}_${y}`;
           spreadsheetMap[key] = row;
-          // spreadsheetRows starts at data.slice(3), so index 0 = sheet row 4
           rowNumberMap[key] = i + 4;
         }
       });
       setPayrollRowMap(rowNumberMap);
 
+      const processedKeys = new Set();
+
       const mergedRows = currentMapping.map(m => {
         const key = `${m.userId}_${monthStr}_${yearStr}`;
+        processedKeys.add(key);
         const existing = spreadsheetMap[key];
-        
+
         let row = new Array(finalHeaders.length).fill('');
-        
-        // If existing row, fill what we have
+
         if (existing) {
-            spreadsheetHeaders.forEach((h, i) => {
-                const targetIdx = finalHeaders.indexOf(h);
-                if (targetIdx !== -1) row[targetIdx] = existing[i];
-            });
+          spreadsheetHeaders.forEach((h, i) => {
+            const targetIdx = finalHeaders.indexOf(h);
+            if (targetIdx !== -1) row[targetIdx] = existing[i];
+          });
         }
-        
-        const empMeta = joiningMeta.find(j => 
-          (j.id && j.id.toLowerCase() === m.userId.toLowerCase()) || 
+
+        const empMeta = joiningMeta.find(j =>
+          (j.id && j.id.toLowerCase() === m.userId.toLowerCase()) ||
           (j.name && j.name.toLowerCase() === m.name.toLowerCase())
         );
 
-        // Populate/Override with metadata
-        const getIdxFinal = (n) => finalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === n.toLowerCase());
-        
-        const eIdIdx = getIdxFinal('EMP ID');
-        const nIdx = getIdxFinal('Name of the Employee');
-        const yIdx = getIdxFinal('Year');
-        const mIdx = getIdxFinal('Month');
-        const dIdx = getIdxFinal('Designation');
-        const lIdx = getIdxFinal('Location');
-        const dojIdxFinal = getIdxFinal('DOJ');
-        const mSalIdx = getIdxFinal('Monthly Salary');
-        const daysInMonIdx = getIdxFinal('Days in a Month');
-        const presIdx = getIdxFinal('Total Present');
-        const totalSalIdxFinal = getIdxFinal('Total Salary');
-        const advIdx = getIdxFinal('Advance Deduction');
-        const brkIdx = getIdxFinal('Brackage');
-        const medIdx = getIdxFinal('Medical');
-        const mgmtIdx = getIdxFinal('Mgmt Adjustment');
-        const payDateIdxFinal = getIdxFinal('Pay Date');
+        if (empIdIdx !== -1) row[empIdIdx] = m.userId;
+        if (nameIdx !== -1) row[nameIdx] = m.name;
+        if (yearIdx !== -1) row[yearIdx] = yearStr;
+        if (monthIdx !== -1) row[monthIdx] = monthStr;
+        if (desigIdx !== -1 && empMeta) row[desigIdx] = empMeta.designation;
+        if (locIdx !== -1) row[locIdx] = m.storeName;
 
-        if (eIdIdx !== -1) row[eIdIdx] = m.userId;
-        if (nIdx !== -1) row[nIdx] = m.name;
-        if (yIdx !== -1) row[yIdx] = yearStr;
-        if (mIdx !== -1) row[mIdx] = monthStr;
-        if (dIdx !== -1 && empMeta) row[dIdx] = empMeta.designation;
-        if (lIdx !== -1) row[lIdx] = m.storeName;
-        if (dojIdxFinal !== -1 && empMeta) row[dojIdxFinal] = empMeta.doj;
-        if (mSalIdx !== -1 && empMeta && (!existing || !row[mSalIdx])) row[mSalIdx] = empMeta.salary;
-        
-        const daysInMonthCalculated = new Date(selectedYear, selectedMonth, 0).getDate();
-        if (daysInMonIdx !== -1) row[daysInMonIdx] = existing && row[daysInMonIdx] ? row[daysInMonIdx] : daysInMonthCalculated;
-        
-        if (presIdx !== -1) {
-            row[presIdx] = attendanceAgg[m.userId] || (existing && existing[spreadsheetHeaders.indexOf('Total Present')] ? existing[spreadsheetHeaders.indexOf('Total Present')] : 0);
+        const monthSalIdx2 = getIdx('Monthly Salary');
+        const masterSalary = masterSalaryMap[m.userId];
+        if (monthSalIdx2 !== -1 && masterSalary !== undefined) {
+          if (!row[monthSalIdx2] || row[monthSalIdx2] === '' || row[monthSalIdx2] === 0) {
+            row[monthSalIdx2] = masterSalary;
+          }
         }
 
-        // Auto-calculate Total Salary for new rows
-        if (!existing && totalSalIdxFinal !== -1 && mSalIdx !== -1 && daysInMonIdx !== -1 && presIdx !== -1) {
-            const monthlySalary = Number(row[mSalIdx]?.toString().replace(/[^\d.]/g, '')) || 0;
-            const totalPresent = Number(row[presIdx]) || 0;
-            const advance = 0;
-            const brackage = 0;
-            const medical = 0;
-            
-            row[totalSalIdxFinal] = Math.ceil((monthlySalary / daysInMonthCalculated) * totalPresent) + brackage + medical - advance;
+        const masterDesig = masterDesignationMap[m.userId];
+        if (desigIdx !== -1 && masterDesig) {
+          row[desigIdx] = masterDesig;
         }
 
-        // Initialize missing fields for new rows
-        if (!existing) {
-            if (advIdx !== -1) row[advIdx] = 0;
-            if (brkIdx !== -1) row[brkIdx] = 0;
-            if (medIdx !== -1) row[medIdx] = 0;
-            if (mgmtIdx !== -1) row[mgmtIdx] = 0;
-            if (payDateIdxFinal !== -1) row[payDateIdxFinal] = new Date().toISOString().split('T')[0];
+        const masterDoj = masterDojMap[m.userId];
+        const dojIdx1 = finalHeaders.findIndex(h => h && ['doi', 'doj', 'date of joining'].includes(h.toString().toLowerCase().trim()));
+        if (dojIdx1 !== -1 && masterDoj) {
+          if (!row[dojIdx1] || row[dojIdx1].toString().trim() === '') {
+            row[dojIdx1] = masterDoj;
+          }
+        }
+
+        let apiCount = attendanceAgg[m.userId] || 0;
+        let calculatedPresent = logsAvailable ? apiCount :
+          (existing && existing[spreadsheetHeaders.indexOf('Total Present')] ? Number(existing[spreadsheetHeaders.indexOf('Total Present')]) : 0);
+
+        const mgmtAdjIdx2 = getIdx('Mgmt Adjustment');
+        if (mgmtAdjIdx2 !== -1 && row[mgmtAdjIdx2]) {
+          calculatedPresent += (Number(row[mgmtAdjIdx2]) || 0);
+        }
+        if (presentIdx !== -1) row[presentIdx] = calculatedPresent;
+
+        const extraPIdx = getIdx('Extra Pending');
+        const fixPIdx = getIdx('Fix Pending');
+        const extraDedIdx = getIdx('Extra Advance Deduction');
+        const fixDedIdx   = getIdx('Fix Advance Deduction');
+
+        const advInfo = advMap[m.userId];
+        if (advInfo) {
+          if (extraPIdx !== -1) row[extraPIdx] = advInfo.extra?.pending || 0;
+          if (fixPIdx !== -1)   row[fixPIdx]   = advInfo.fix?.pending || 0;
+          
+          if (extraDedIdx !== -1) row[extraDedIdx] = (advInfo.extra?.pending > 0) ? (advInfo.extra?.deduction || 0) : 0;
+          if (fixDedIdx !== -1)   row[fixDedIdx]   = (advInfo.fix?.pending > 0)   ? (advInfo.fix?.deduction || 0) : 0;
+        } else {
+          if (extraPIdx !== -1) row[extraPIdx] = 0;
+          if (fixPIdx !== -1)   row[fixPIdx]   = 0;
+          if (extraDedIdx !== -1) row[extraDedIdx] = 0;
+          if (fixDedIdx !== -1)   row[fixDedIdx]   = 0;
+        }
+
+        const monthSalIdx = getIdx('Monthly Salary');
+        const daysMonthIdx = getIdx('Days in a Month');
+        const brackageIdx = finalHeaders.findIndex(h => h && ['brackage', 'brackege', 'breakage'].includes(h.toString().toLowerCase().trim()));
+        const medicalIdx = finalHeaders.findIndex(h => h && ['medical', 'medicle'].includes(h.toString().toLowerCase().trim()));
+        const totalSalIdx = getIdx('Total Salary');
+
+        if (totalSalIdx !== -1 && monthSalIdx !== -1 && daysMonthIdx !== -1 && presentIdx !== -1 && brackageIdx !== -1 && medicalIdx !== -1) {
+          const monthlySalary = Number(row[monthSalIdx]) || 0;
+          const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+          row[daysMonthIdx] = daysInMonth;
+          const brackage = Number(row[brackageIdx]) || 0;
+          const medical = Number(row[medicalIdx]) || 0;
+          const extraAdvDed = extraDedIdx !== -1 ? (Number(row[extraDedIdx]) || 0) : 0;
+          const fixAdvDed = fixDedIdx !== -1 ? (Number(row[fixDedIdx]) || 0) : 0;
+          
+          row[totalSalIdx] = Math.ceil((monthlySalary / daysInMonth) * calculatedPresent) - brackage - medical - extraAdvDed - fixAdvDed;
         }
 
         return row;
       });
 
-      setSalaryData({ headers: finalHeaders, rows: mergedRows });
+      Object.keys(spreadsheetMap).forEach(key => {
+        const parts = key.split('_');
+        if (parts.length >= 3) {
+          const kEmpId = parts[0];
+          const kMonth = parts[1];
+          const kYear = parts.slice(2).join('_');
+
+          if (kMonth === monthStr && kYear === yearStr && !processedKeys.has(key)) {
+            const existing = spreadsheetMap[key];
+            let row = new Array(finalHeaders.length).fill('');
+            spreadsheetHeaders.forEach((h, i) => {
+              const targetIdx = finalHeaders.indexOf(h);
+              if (targetIdx !== -1) row[targetIdx] = existing[i];
+            });
+
+            if (empIdIdx !== -1) {
+              row[empIdIdx] = kEmpId;
+            }
+
+            const masterDojDirect = masterDojMap[kEmpId];
+            const dojIdx2 = finalHeaders.findIndex(h => h && ['doi', 'doj', 'date of joining'].includes(h.toString().toLowerCase().trim()));
+            if (dojIdx2 !== -1 && masterDojDirect) {
+              if (!row[dojIdx2] || row[dojIdx2].toString().trim() === '') {
+                row[dojIdx2] = masterDojDirect;
+              }
+            }
+
+            let apiCount = attendanceAgg[kEmpId] || 0;
+            let calculatedPresent = logsAvailable ? apiCount :
+              (existing && existing[spreadsheetHeaders.indexOf('Total Present')] ? Number(existing[spreadsheetHeaders.indexOf('Total Present')]) : 0);
+
+            const mgmtAdjIdx2 = getIdx('Mgmt Adjustment');
+            if (mgmtAdjIdx2 !== -1 && row[mgmtAdjIdx2]) {
+              calculatedPresent += (Number(row[mgmtAdjIdx2]) || 0);
+            }
+            if (presentIdx !== -1) row[presentIdx] = calculatedPresent;
+
+            const advDedIdx = getIdx('Advance Deduction');
+            const extraPIdx = getIdx('Extra Pending');
+            const fixPIdx = getIdx('Fix Pending');
+
+            if (advDedIdx !== -1) {
+              const advInfo = advMap[kEmpId];
+              if (advInfo) {
+                const totalPending = (advInfo.extra?.pending || 0) + (advInfo.fix?.pending || 0);
+                const totalDed = (advInfo.extra?.deduction || 0) + (advInfo.fix?.deduction || 0);
+
+                if (totalPending === 0) {
+                  row[advDedIdx] = '';
+                } else {
+                  row[advDedIdx] = totalDed || row[advDedIdx];
+                }
+
+                if (extraPIdx !== -1) row[extraPIdx] = advInfo.extra?.pending || 0;
+                if (fixPIdx !== -1) row[fixPIdx] = advInfo.fix?.pending || 0;
+              }
+            }
+
+            const monthSalIdx = getIdx('Monthly Salary');
+            const daysMonthIdx = getIdx('Days in a Month');
+            const brackageIdx = finalHeaders.findIndex(h => h && ['brackage', 'brackege', 'breakage'].includes(h.toString().toLowerCase().trim()));
+            const medicalIdx = finalHeaders.findIndex(h => h && ['medical', 'medicle'].includes(h.toString().toLowerCase().trim()));
+            const totalSalIdx = getIdx('Total Salary');
+
+            if (totalSalIdx !== -1 && monthSalIdx !== -1 && daysMonthIdx !== -1 &&
+              presentIdx !== -1 && brackageIdx !== -1 && medicalIdx !== -1 && advDedIdx !== -1) {
+              const monthlySalary = Number(row[monthSalIdx]) || 0;
+              const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
+              row[daysMonthIdx] = daysInMonth;
+              const brackage = Number(row[brackageIdx]) || 0;
+              const medical = Number(row[medicalIdx]) || 0;
+              const advance = Number(row[advDedIdx]) || 0;
+              row[totalSalIdx] = Math.ceil((monthlySalary / daysInMonth) * calculatedPresent) - brackage - medical - advance;
+            }
+
+            mergedRows.push(row);
+          }
+        }
+      });
+
+      const cleanedRows = mergedRows.filter(row => {
+        const id = row[empIdIdx]?.toString().trim();
+        const name = row[nameIdx]?.toString().trim();
+        return id || name;
+      });
+
+      setSalaryData({ headers: finalHeaders, rows: cleanedRows });
 
     } catch (err) {
       setError("Failed to fetch data: " + err.message);
@@ -344,22 +541,22 @@ const Payroll = () => {
     fetchEmployees();
   }, [activeTab, selectedMonth, selectedYear]);
 
-  // Dedicated JOINING sheet script (same as Employee.jsx, Dashboard.jsx, LeaveManagement.jsx)
-
-
   const fetchEmployees = async () => {
     try {
       const response = await fetch(
-        `${JOINING_SCRIPT_URL}?sheet=JOINING&action=fetch`
+        `${JOINING_SCRIPT_URL}?sheet=JOINING&action=fetch&spreadsheetId=1d10niZ9MX1DIVpSqplzANqPylPTYiXq7TYSYSRNaBUg`
       );
       const result = await response.json();
       if (result.success && result.data) {
-        // E7:E → data starts row 7 (index 6), Col E (index 4) = Name, Col B (index 1) = ID
         const emps = result.data.slice(6)
           .filter(row => row[4] && row[4].toString().trim() !== '')
           .map(row => ({
             id: row[1] || '',
-            name: row[4].toString().trim()
+            name: row[4].toString().trim(),
+            dateOfJoining: row[6] ? row[6].toString().trim() : '',
+            joiningPlace: row[7] ? row[7].toString().trim() : '',
+            designation: row[8] ? row[8].toString().trim() : '',
+            salary: row[9] ? row[9].toString().trim() : '0'
           }));
         setEmployees(emps);
       }
@@ -370,10 +567,27 @@ const Payroll = () => {
 
   const handleEmployeeChange = (name) => {
     const emp = employees.find(e => e.name === name);
+    const joinSalary = emp ? (emp.salary || '0') : '0';
+    const empId = emp ? emp.id : '';
+    const advInfo = empId ? advanceInfoMap[empId] : null;
+
+    const extraDed = Math.min(advInfo?.extra?.deduction || 0, advInfo?.extra?.pending || 0);
+    const fixDed = Math.min(advInfo?.fix?.deduction || 0, advInfo?.fix?.pending || 0);
+
     setFormData(prev => ({
       ...prev,
       employeeName: name,
-      employeeId: emp ? emp.id : ''
+      employeeId: empId,
+      designation: emp ? emp.designation : '',
+      joiningPlace: emp ? emp.joiningPlace : '',
+      dateOfJoining: emp ? (emp.dateOfJoining ? formatDate(emp.dateOfJoining) : '') : '',
+      monthlySalary: joinSalary,
+      extraAdvanceDeduction: extraDed.toString(),
+      fixAdvanceDeduction: fixDed.toString(),
+      advanceDeduction: (extraDed + fixDed).toString(),
+      brackage: '0',
+      medical: '0',
+      totalSalary: (Number(joinSalary) - (extraDed + fixDed)).toString()
     }));
   };
 
@@ -381,9 +595,24 @@ const Payroll = () => {
     const { name, value } = e.target;
     if (name === 'employeeName') {
       handleEmployeeChange(value);
-    } else {
-      setFormData(prev => ({ ...prev, [name]: value }));
+      return;
     }
+
+    setFormData(prev => {
+      const updated = { ...prev, [name]: value };
+
+      const monthly = name === 'monthlySalary' ? Number(value) : Number(prev.monthlySalary || 0);
+      const extraAdv = name === 'extraAdvanceDeduction' ? Number(value) : Number(prev.extraAdvanceDeduction || 0);
+      const fixAdv = name === 'fixAdvanceDeduction' ? Number(value) : Number(prev.fixAdvanceDeduction || 0);
+      const advance = extraAdv + fixAdv;
+      const brack = name === 'brackage' ? Number(value) : Number(prev.brackage || 0);
+      const med = name === 'medical' ? Number(value) : Number(prev.medical || 0);
+
+      updated.advanceDeduction = advance.toString();
+      updated.totalSalary = (monthly - advance - brack - med).toString();
+
+      return updated;
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -396,31 +625,39 @@ const Payroll = () => {
     setIsSubmitting(true);
     try {
       const now = new Date();
-      const timestamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      const monthIndex = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].indexOf(formData.month);
+      const daysInMonth = new Date(Number(formData.year), monthIndex + 1, 0).getDate();
+      const creationDate = now.toISOString().split('T')[0];
 
-      // A=Timestamp | B:N=13 data cols | O=Pay Date
-      const rowData = [
-        timestamp,                  // A - Timestamp
-        formData.employeeId,        // B - Employee ID
-        formData.employeeName,      // C - Employee Name
-        formData.year,              // D - Year
-        formData.month,             // E - Month
-        formData.basicSalary,       // F - Basic Salary
-        formData.lta,               // G - LTA
-        formData.bonus,             // H - Bonus
-        formData.otherAllowance,    // I - Other Allowance
-        formData.overtime,          // J - Overtime
-        formData.pf,                // K - PF
-        formData.loan,              // L - Loan
-        formData.otherDeduction,    // M - Other Deduction
-        formData.status,            // N - Status
-        formData.payDate            // O - Pay Date
-      ];
+      const rowData = new Array(20).fill('');
+      const empId = formData.employeeId;
+      const advInfo = advanceInfoMap[empId];
 
-      const response = await fetch(SCRIPT_URLS.HR_JOINING, {
+      rowData[0] = '';                          // S.N
+      rowData[1] = empId;                       // EMP ID
+      rowData[2] = formData.employeeName;       // Name
+      rowData[3] = formatDateToDMY(formData.dateOfJoining); // DOJ (DD/MM/YYYY)
+      rowData[4] = formData.year;               // Year
+      rowData[5] = formData.month;              // Month
+      rowData[6] = formData.designation;        // Designation
+      rowData[7] = formData.joiningPlace;       // Location
+      rowData[8] = formData.monthlySalary;      // Monthly Salary
+      rowData[9] = daysInMonth;                 // Days in Month
+      rowData[10] = '0';                        // Mgmt Adjustment
+      rowData[11] = '0';                        // Total Present
+      rowData[12] = advInfo?.fix?.pending || 0;     // Fix Pending
+      rowData[13] = formData.fixAdvanceDeduction;   // Fix Deduction
+      rowData[14] = advInfo?.extra?.pending || 0;   // Extra Pending
+      rowData[15] = formData.extraAdvanceDeduction; // Extra Deduction
+      rowData[16] = formData.brackage;              // Brackage
+      rowData[17] = formData.medical;               // Medical
+      rowData[18] = formData.totalSalary;           // Total Salary
+      rowData[19] = creationDate;                   // New payroll Date (Column T)
+
+      const response = await fetch(PAYROLL_SCRIPT_URL, {
         method: 'POST',
         body: new URLSearchParams({
-          sheetName: 'New Payroll',
+          sheetName: 'PAYROLL',
           action: 'insert',
           spreadsheetId: '1lg8cvRaYHpnR75bWxHoh-a30-gGL94-_WAnE7Zue6r8',
           rowData: JSON.stringify(rowData)
@@ -431,23 +668,9 @@ const Payroll = () => {
       if (result.success) {
         toast.success("Payroll entry added successfully!");
         setShowModal(false);
-        fetchPayrollData(); // Refresh table
-        // Reset form except year/month/status/paydate defaults
-        setFormData(prev => ({
-          ...prev,
-          employeeId: '',
-          employeeName: '',
-          basicSalary: '0',
-          lta: '0',
-          bonus: '0',
-          otherAllowance: '0',
-          overtime: '0',
-          pf: '0',
-          loan: '0',
-          otherDeduction: '0',
-          status: 'Draft',
-          payDate: new Date().toISOString().split('T')[0]
-        }));
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
       } else {
         toast.error(result.error || "Failed to add payroll entry");
       }
@@ -459,7 +682,6 @@ const Payroll = () => {
     }
   };
 
-  // --- Checkbox & Edit Handlers ---
   const handleCheckbox = (rowIndex, row) => {
     setSelectedRows(prev => {
       const next = new Set(prev);
@@ -479,7 +701,6 @@ const Payroll = () => {
       const updatedRow = [...(prev[rowIndex] || [])];
       updatedRow[cellIndex] = value;
 
-      // --- LIVE CALCULATION LOGIC ---
       if (headers && originalRow) {
         const getIdx = (name) => headers.findIndex(h => h?.toString().toLowerCase().trim() === name.toLowerCase());
 
@@ -489,10 +710,10 @@ const Payroll = () => {
         const daysMonthIdx = getIdx('Days in a Month');
         const brackageIdx = getIdx('Brackage');
         const medicalIdx = getIdx('Medical');
-        const advDedIdx = getIdx('Advance Deduction');
+        const fixDedIdx   = getIdx('Fix Advance Deduction');
+        const extraDedIdx = getIdx('Extra Advance Deduction');
         const totalSalIdx = getIdx('Total Salary');
 
-        // 1. Calculate Total Present dynamically
         if (mgmtAdjIdx !== -1 && presentIdx !== -1) {
           const origTotalPresent = Number(originalRow[presentIdx]) || 0;
           const origMgmtAdj = Number(originalRow[mgmtAdjIdx]) || 0;
@@ -503,22 +724,21 @@ const Payroll = () => {
           updatedRow[presentIdx] = newTotalPresent;
         }
 
-        // 2. Calculate Total Salary dynamically
         if (
           totalSalIdx !== -1 && monthSalIdx !== -1 && daysMonthIdx !== -1 &&
-          presentIdx !== -1 && brackageIdx !== -1 && medicalIdx !== -1 && advDedIdx !== -1
+          presentIdx !== -1 && brackageIdx !== -1 && medicalIdx !== -1
         ) {
           const monthlySalary = Number(updatedRow[monthSalIdx]) || 0;
-          const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate(); 
+          const daysInMonth = new Date(selectedYear, selectedMonth, 0).getDate();
           const totalPresent = Number(updatedRow[presentIdx]) || 0;
           const brackage = Number(updatedRow[brackageIdx]) || 0;
           const medical = Number(updatedRow[medicalIdx]) || 0;
-          const advance = Number(updatedRow[advDedIdx]) || 0;
+          const fixAdvDed = fixDedIdx !== -1 ? (Number(updatedRow[fixDedIdx]) || 0) : 0;
+          const extraAdvDed = extraDedIdx !== -1 ? (Number(updatedRow[extraDedIdx]) || 0) : 0;
 
-          // Always sync days in month correctly
           updatedRow[daysMonthIdx] = daysInMonth;
 
-          const totalSalary = Math.ceil((monthlySalary / daysInMonth) * totalPresent) + brackage + medical - advance;
+          const totalSalary = Math.ceil((monthlySalary / daysInMonth) * totalPresent) - brackage - medical - fixAdvDed - extraAdvDed;
           updatedRow[totalSalIdx] = totalSalary;
         }
       }
@@ -535,11 +755,14 @@ const Payroll = () => {
 
     const updates = [];
     const skipped = [];
+    const updatePromises = [];
     const originalHeaders = salaryData?.headers || [];
     const displayHeaders = getReorderedHeaders(originalHeaders);
     const empIdColIdx = originalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === 'emp id');
     const monthColIdx = originalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === 'month');
     const yearColIdx = originalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === 'year');
+    const fixDedColIdx = originalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === 'fix advance deduction');
+    const extraDedColIdx = originalHeaders.findIndex(h => h && h.toString().trim().toLowerCase() === 'extra advance deduction');
 
     selectedRows.forEach(rowIndex => {
       if (editingData[rowIndex]) {
@@ -547,7 +770,6 @@ const Payroll = () => {
         const originalDataRow = salaryData.rows[rowIndex] || [];
         const originalDisplayRow = reorderRow(originalDataRow, originalHeaders);
 
-        // Resolve real sheet row by EMP ID + Month + Year (NOT by display position)
         const empId = originalDataRow[empIdColIdx]?.toString().trim();
         const month = originalDataRow[monthColIdx]?.toString().trim();
         const year = originalDataRow[yearColIdx]?.toString().trim();
@@ -566,9 +788,26 @@ const Payroll = () => {
             const originalColIndex = originalHeaders.indexOf(headerName);
             if (originalColIndex !== -1) {
               changedCells.push({
-                colIndex: originalColIndex, // 0-based column index as in headers
+                colIndex: originalColIndex, 
                 value: editedRow[j]
               });
+
+              if (originalColIndex === fixDedColIdx) {
+                const advInfo = advanceInfoMap[empId];
+                if (advInfo?.fix?.rowIndex) {
+                  updatePromises.push(
+                    fetch(`${PAYROLL_SCRIPT_URL}?action=updateCell&sheetName=ADVANCE&spreadsheetId=${SPREADSHEET_ID}&rowIndex=${advInfo.fix.rowIndex}&columnIndex=10&value=${editedRow[j]}`)
+                  );
+                }
+              }
+              if (originalColIndex === extraDedColIdx) {
+                const advInfo = advanceInfoMap[empId];
+                if (advInfo?.extra?.rowIndex) {
+                  updatePromises.push(
+                    fetch(`${PAYROLL_SCRIPT_URL}?action=updateCell&sheetName=ADVANCE&spreadsheetId=${SPREADSHEET_ID}&rowIndex=${advInfo.extra.rowIndex}&columnIndex=10&value=${editedRow[j]}`)
+                  );
+                }
+              }
             }
           }
         }
@@ -590,7 +829,6 @@ const Payroll = () => {
     }
 
     try {
-      const updatePromises = [];
       for (const update of updates) {
         for (const change of update.changes) {
           const params = new URLSearchParams({
@@ -616,7 +854,9 @@ const Payroll = () => {
         toast.success(`${updates.length} row(s) updated successfully!`);
         setSelectedRows(new Set());
         setEditingData({});
-        fetchPayrollData();
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
       } else {
         const errorMsg = results.find(r => !r.success)?.error || 'Server rejected the update';
         toast.error(`Update failed: ${errorMsg}`);
@@ -641,24 +881,39 @@ const Payroll = () => {
     const SPREADSHEET_ID = '1lg8cvRaYHpnR75bWxHoh-a30-gGL94-_WAnE7Zue6r8';
 
     try {
-      const insertPromises = salaryData.rows.map(row =>
-        fetch(PAYROLL_SCRIPT_URL, {
+      const dojIdx = INTERNAL_ORDER.indexOf('DOJ');
+      const newPayrollDateIdx = INTERNAL_ORDER.indexOf('New payroll Date');
+
+      const insertPromises = salaryData.rows.map(row => {
+        const rowToSubmit = reorderRow(row, salaryData.headers, true);
+
+        if (dojIdx !== -1 && rowToSubmit[dojIdx]) {
+          rowToSubmit[dojIdx] = formatDateToDMY(rowToSubmit[dojIdx]);
+        }
+
+        if (newPayrollDateIdx !== -1) {
+          rowToSubmit[newPayrollDateIdx] = new Date().toISOString().split('T')[0];
+        }
+
+        return fetch(PAYROLL_SCRIPT_URL, {
           method: 'POST',
           body: new URLSearchParams({
             action: 'insert',
             sheetName: 'PAID Record',
             spreadsheetId: SPREADSHEET_ID,
-            rowData: JSON.stringify(row)
+            rowData: JSON.stringify(rowToSubmit)
           })
-        }).then(r => r.json())
-      );
+        }).then(r => r.json());
+      });
 
       const results = await Promise.all(insertPromises);
       const failed = results.filter(r => !r.success);
 
       if (failed.length === 0) {
         toast.success(`${results.length} row(s) submitted to PAID Record.`);
-        fetchHistoryData();
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
       } else {
         toast.error(`${failed.length} row(s) failed: ${failed[0]?.error || 'Server rejected the insert'}`);
         console.error('PAID Record insert failures:', failed);
@@ -671,32 +926,48 @@ const Payroll = () => {
     setIsSubmittingPayments(false);
   };
 
+  const INTERNAL_ORDER = [
+    'S.N', 'EMP ID', 'Name of the Employee', 'DOJ', 'Year', 'Month', 
+    'Designation', 'Location', 'Monthly Salary', 'Days in a Month', 
+    'Mgmt Adjustment', 'Total Present', 'Fix Pending', 'Fix Advance Deduction', 
+    'Extra Pending', 'Extra Advance Deduction', 'Brackage', 'Medical', 
+    'Total Salary', 'New payroll Date'
+  ];
 
   const getReorderedHeaders = (headers) => {
-    if (!headers) return [];
-    const preferredOrder = [
-      'EMP ID', 'Name of the Employee', 'Year', 'Month', 
-      'Designation', 'Location', 'DOJ', 'Monthly Salary', 
-      'Days in a Month', 'Mgmt Adjustment', 'Total Present', 
-      'Advance Deduction', 'Brackage', 'Medical', 'Total Salary', 'Pay Date'
-    ];
-    const result = [];
-    preferredOrder.forEach(h => {
-      const idx = headers.findIndex(orig => orig && orig.toString().trim().toLowerCase() === h.toLowerCase());
-      if (idx !== -1) result.push(headers[idx]);
+    if (!headers || !salaryData.rows) return headers;
+
+    const hasExtra = salaryData.rows.some(r => {
+      const pIdx = headers.indexOf('Extra Pending');
+      const dIdx = headers.indexOf('Extra Advance Deduction');
+      const pVal = pIdx !== -1 ? (Number(r[pIdx]) || 0) : 0;
+      const dVal = dIdx !== -1 ? (Number(r[dIdx]) || 0) : 0;
+      return pVal > 0 || dVal > 0;
     });
-    headers.forEach(h => {
-      if (!result.includes(h)) result.push(h);
+
+    const hasFix = salaryData.rows.some(r => {
+      const pIdx = headers.indexOf('Fix Pending');
+      const dIdx = headers.indexOf('Fix Advance Deduction');
+      const pVal = pIdx !== -1 ? (Number(r[pIdx]) || 0) : 0;
+      const dVal = dIdx !== -1 ? (Number(r[dIdx]) || 0) : 0;
+      return pVal > 0 || dVal > 0;
     });
-    return result;
+    
+    return INTERNAL_ORDER.filter(h => {
+      if (h === 'Extra Advance Deduction' && !hasExtra) return false;
+      if (h === 'Fix Advance Deduction' && !hasFix) return false;
+      if (h === 'Extra Pending' && !hasExtra) return false;
+      if (h === 'Fix Pending' && !hasFix) return false;
+      return true;
+    });
   };
 
-  const reorderRow = (row, headers) => {
+  const reorderRow = (row, headers, useInternal = false) => {
     if (!row || !headers) return row;
-    const reorderedHeaders = getReorderedHeaders(headers);
-    return reorderedHeaders.map(h => {
-      const idx = headers.indexOf(h);
-      return idx !== -1 ? row[idx] : '';
+    const targetHeaders = useInternal ? INTERNAL_ORDER : getReorderedHeaders(headers);
+    return targetHeaders.map(h => {
+      const origIdx = headers.indexOf(h);
+      return row[origIdx] ?? '';
     });
   };
 
@@ -704,103 +975,119 @@ const Payroll = () => {
     if (!data || !data.headers) return null;
 
     const headers = isSalary ? getReorderedHeaders(data.headers) : data.headers;
-    const filteredRows = data.rows.filter(row =>
-      row.some(cell => cell && cell.toString().toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    const searchLower = searchTerm.toLowerCase();
 
     return (
       <div>
-        {/* Update Toolbar */}
         {isSalary && selectedRows.size > 0 && (
-          <div className="flex items-center gap-3 mb-3 p-3 bg-blue-50 border border-blue-200 rounded-xl animate-in slide-in-from-top duration-200">
-            <Edit2 size={16} className="text-blue-600" />
-            <span className="text-sm font-semibold text-blue-700">{selectedRows.size} row(s) selected for editing</span>
+          <div className="flex items-center gap-3 mb-4 p-4 bg-white/80 backdrop-blur border border-blue-200 rounded-2xl animate-in slide-in-from-top duration-300 shadow-xl shadow-blue-900/5">
+            <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600">
+              <Edit2 size={16} className="ml-0.5" />
+            </div>
+            <span className="text-sm font-semibold text-blue-800">{selectedRows.size} row(s) selected for editing</span>
             <button
               onClick={handleUpdate}
               disabled={isUpdating}
-              className="ml-auto flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow transition-all active:scale-95 disabled:opacity-50"
+              className="ml-auto flex items-center gap-2 px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-bold rounded-xl shadow-lg shadow-blue-500/30 transition-all active:scale-95 disabled:opacity-50"
             >
               {isUpdating ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-              {isUpdating ? 'Updating...' : 'Update'}
+              {isUpdating ? 'Updating...' : 'Update Records'}
             </button>
             <button
               onClick={() => { setSelectedRows(new Set()); setEditingData({}); }}
-              className="px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-100 rounded-xl transition-all"
+              className="px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-800 rounded-xl transition-all"
             >
               Cancel
             </button>
           </div>
         )}
 
-        <div className="overflow-auto max-h-[600px] border border-gray-200 rounded-lg">
-          <table className="min-w-full divide-y divide-gray-200 border-separate border-spacing-0">
-            <thead className="bg-sky-200 sticky top-0 z-10">
+        <div className="overflow-auto max-h-[600px] bg-white ring-1 ring-slate-200 rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+          <table className="min-w-full divide-y divide-slate-100 border-separate border-spacing-0">
+            <thead className="bg-slate-50/90 backdrop-blur-md sticky top-0 z-20">
               <tr>
-                {/* Action Column Header */}
                 {isSalary && (
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b border-gray-200 bg-sky-200 sticky top-0 z-10 w-12">
+                  <th className="px-5 py-4 text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-100 sticky top-0 z-20 w-12 bg-slate-50/90 backdrop-blur-md">
                     Action
                   </th>
                 )}
                 {headers.map((header, i) => (
-                  <th key={i} className="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider border-b border-gray-200 bg-sky-200 sticky top-0 z-10">
+                  <th key={i} className="px-6 py-4 text-left text-[11px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-100 sticky top-0 z-20 bg-slate-50/90 backdrop-blur-md whitespace-nowrap">
                     {header}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-100">
-              {filteredRows.map((row, i) => {
+            <tbody className="bg-white divide-y divide-slate-50">
+              {data.rows.map((row, originalIdx) => {
+                const matchesSearch = row.some(cell => cell && cell.toString().toLowerCase().includes(searchLower));
+                if (!matchesSearch) return null;
+
                 const displayRow = isSalary ? reorderRow(row, data.headers) : row;
-                const isSelected = selectedRows.has(i);
+                const isSelected = selectedRows.has(originalIdx);
                 return (
-                  <tr key={i} className={`transition-colors ${isSelected ? 'bg-blue-50 ring-1 ring-inset ring-blue-300' : 'hover:bg-gray-50'}`}>
-                    {/* Checkbox Cell */}
+                  <tr key={originalIdx} className={`transition-all duration-300 group ${isSelected ? 'bg-blue-50/40 relative' : 'hover:bg-slate-50/80'} `}>
                     {isSalary && (
-                      <td className="px-4 py-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => handleCheckbox(i, displayRow)}
-                          className="w-4 h-4 accent-blue-600 rounded cursor-pointer"
-                        />
+                      <td className={`px-5 py-3 text-center whitespace-nowrap border-l-4 transition-colors ${isSelected ? 'border-blue-500' : 'border-transparent group-hover:border-slate-200'}`}>
+                        <div className="inline-flex items-center justify-center p-1 rounded-full hover:bg-white transition-colors">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleCheckbox(originalIdx, displayRow)}
+                            className="w-4 h-4 accent-blue-600 rounded-md cursor-pointer transition-transform hover:scale-110"
+                          />
+                        </div>
                       </td>
                     )}
                     {displayRow.map((cell, j) => {
                       const header = headers[j]?.toString().toLowerCase().trim() || "";
-                      const isDateColumn = header.includes('date of joining') || header === 'doj';
+                      const isDateColumn = header.includes('date of joining') || header === 'doj' || header.includes('new payroll date') || header === 'creation date' || header === 'pay date';
+                      const isFixAdv = header === 'fix advance deduction';
+                      const isExtraAdv = header === 'extra advance deduction';
+                      const isBreakage = header === 'brackage' || header === 'brackege' || header === 'breakage';
+                      const isMedical = header === 'medical' || header === 'medicle';
+                      const isMgmtAdj = header === 'mgmt adjustment';
+                      
+                      const isEditableField = isFixAdv || isExtraAdv || isBreakage || isMedical || isMgmtAdj;
+
                       const isSno = header === 's.n' || header === 's.no' || header === 'sn';
                       const isEmpId = header === 'emp id';
                       const isEmpName = header === 'name of the employee';
                       const isYear = header === 'year';
                       const isMonth = header === 'month';
-                      const isDesig = header === 'designation';
-                      const isLoc = header === 'location' || header === 'store name';
                       const isPresent = header === 'total present';
-                      const isDisabled = isEmpId || isEmpName || isSno || isYear || isMonth || isDesig || isLoc || isPresent;
+                      const isTotalSal = header === 'total salary';
+                      const isNewPayrollDate = header.includes('new payroll date');
+                      const isExtraPending = header === 'extra pending';
+                      const isFixPending = header === 'fix pending';
+                      
+                      const isDisabled = !isEditableField || isEmpId || isEmpName || isSno || isYear || isMonth || isPresent || isTotalSal || isNewPayrollDate || isExtraPending || isFixPending;
 
                       let displayCell = isDateColumn ? formatDate(cell) : cell;
                       if (isSno && (!displayCell || displayCell.toString().trim() === '')) {
-                        displayCell = i + 1;
+                        displayCell = originalIdx + 1;
                       }
 
                       if (isSalary && isSelected) {
+                        let inputValue = (isSno ? displayCell : editingData[originalIdx]?.[j]) ?? displayCell ?? '';
+                        if (isDateColumn) inputValue = formatDate(inputValue);
+
                         return (
                           <td key={j} className="px-2 py-2 whitespace-nowrap">
                             <input
                               type="text"
-                              value={(isSno ? displayCell : editingData[i]?.[j]) ?? displayCell ?? ''}
-                              onChange={(e) => handleCellEdit(i, j, e.target.value, headers, displayRow)}
+                              value={inputValue}
+                              onChange={(e) => handleCellEdit(originalIdx, j, e.target.value, headers, displayRow)}
                               disabled={isDisabled}
-                              className={`w-full min-w-[80px] px-2 py-1 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${isDisabled ? 'bg-gray-100 text-gray-400 cursor-not-allowed border-gray-200' : 'bg-white text-gray-800 border-blue-300'}`}
+                              className={`w-full min-w-[80px] px-3 py-1.5 border-2 rounded-xl text-sm font-medium transition-all outline-none ${isDisabled ? 'bg-slate-100 text-slate-400 border-transparent cursor-not-allowed' : 'bg-white text-slate-800 border-blue-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 shadow-sm'}`}
                             />
                           </td>
                         );
                       }
 
                       return (
-                        <td key={j} className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          {displayCell}
+                        <td key={j} className={`px-6 py-4 whitespace-nowrap text-sm ${isSno ? 'font-medium text-slate-400' : isExtraPending ? 'font-bold text-rose-500 italic' : isFixPending ? 'font-bold text-indigo-500 italic' : 'font-medium text-slate-700'}`}>
+                          {(isExtraPending || isFixPending) && displayCell > 0 ? `₹${Number(displayCell).toLocaleString()}` : ((isExtraPending || isFixPending) ? '₹0' : displayCell)}
                         </td>
                       );
                     })}
@@ -814,25 +1101,26 @@ const Payroll = () => {
     );
   };
 
-
   return (
-    <div className="p-6 space-y-6 bg-white min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">Payroll Management</h1>
-        <div className="flex flex-col md:flex-row md:items-center gap-4">
-          <div className="relative max-w-sm w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+    <div className="p-6 md:p-8 space-y-8 bg-gradient-to-br from-slate-50 to-blue-50/30 min-h-screen font-sans">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <h1 className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-700 tracking-tight">
+          Payroll Management
+        </h1>
+        <div className="flex flex-col md:flex-row md:items-center gap-4 w-full md:w-auto">
+          <div className="relative w-full md:w-80 h-11">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="text"
               placeholder="Search payroll records..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              className="w-full h-full pl-11 pr-4 bg-white shadow-sm border border-slate-200 rounded-full focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all placeholder:text-slate-400"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-medium shadow-sm active:scale-95"
+            className="flex items-center justify-center gap-2 h-11 px-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-full hover:shadow-lg hover:shadow-blue-500/30 transition-all font-semibold active:scale-95"
           >
             <Plus size={18} />
             New Payroll
@@ -841,26 +1129,25 @@ const Payroll = () => {
             <button
               onClick={handleSubmitPayments}
               disabled={isSubmittingPayments || !salaryData?.rows?.length}
-              className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 transition-all font-medium shadow-sm active:scale-95 disabled:opacity-50"
+              className="flex items-center justify-center gap-2 h-11 px-6 bg-gradient-to-r from-emerald-500 to-teal-600 text-white rounded-full hover:shadow-lg hover:shadow-emerald-500/30 transition-all font-semibold active:scale-95 disabled:opacity-50 disabled:hover:shadow-none"
             >
               {isSubmittingPayments ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
               {isSubmittingPayments ? 'Submitting...' : 'Submit Payments'}
             </button>
           )}
         </div>
-
       </div>
 
-      <div className="flex border-b border-gray-200 justify-between items-center pr-4">
-        <div className="flex">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div className="flex bg-slate-200/60 backdrop-blur-md p-1 rounded-full shadow-inner w-full md:w-auto">
           <button
-            className={`px-6 py-3 text-sm font-medium transition-all border-b-2 ${activeTab === 'salary' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 md:flex-none px-6 py-2.5 text-sm font-semibold rounded-full transition-all duration-300 ${activeTab === 'salary' ? 'bg-white text-blue-700 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
             onClick={() => setActiveTab('salary')}
           >
             Salary Sheet
           </button>
           <button
-            className={`px-6 py-3 text-sm font-medium transition-all border-b-2 ${activeTab === 'history' ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 md:flex-none px-6 py-2.5 text-sm font-semibold rounded-full transition-all duration-300 ${activeTab === 'history' ? 'bg-white text-blue-700 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
             onClick={() => setActiveTab('history')}
           >
             History
@@ -868,25 +1155,26 @@ const Payroll = () => {
         </div>
 
         {activeTab === 'salary' && (
-          <div className="flex items-center gap-3 py-2">
+          <div className="flex items-center gap-3 bg-white px-4 py-2 border border-slate-200 rounded-full shadow-sm">
             <div className="flex items-center gap-2">
-              <label className="text-[10px] font-black uppercase text-gray-400">Month</label>
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Month</label>
               <select
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
-                className="px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold text-slate-700 outline-none"
+                className="px-2 py-1 bg-slate-50 hover:bg-slate-100 border border-transparent rounded-md text-sm font-bold text-slate-700 outline-none transition-colors cursor-pointer"
               >
                 {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((m, idx) => (
                   <option key={m} value={idx + 1}>{m}</option>
                 ))}
               </select>
             </div>
+            <div className="w-px h-5 bg-slate-200 mx-1"></div>
             <div className="flex items-center gap-2">
-              <label className="text-[10px] font-black uppercase text-gray-400">Year</label>
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Year</label>
               <select
                 value={selectedYear}
                 onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                className="px-2 py-1 bg-gray-50 border border-gray-200 rounded-lg text-xs font-bold text-slate-700 outline-none"
+                className="px-2 py-1 bg-slate-50 hover:bg-slate-100 border border-transparent rounded-md text-sm font-bold text-slate-700 outline-none transition-colors cursor-pointer"
               >
                 {[2024, 2025, 2026].map(y => (
                   <option key={y} value={y}>{y}</option>
@@ -898,58 +1186,62 @@ const Payroll = () => {
       </div>
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-20 space-y-4">
-          <Loader2 className="animate-spin text-blue-600" size={40} />
-          <p className="text-gray-500 animate-pulse">Fetching payroll records...</p>
+        <div className="flex flex-col items-center justify-center py-24 space-y-4">
+          <Loader2 className="animate-spin text-blue-600" size={44} />
+          <p className="text-slate-500 animate-pulse font-medium">Fetching payroll records...</p>
         </div>
       ) : error ? (
-        <div className="p-4 bg-red-50 border border-red-100 rounded-lg text-red-600 text-center">
-          {error}
-          <button onClick={() => activeTab === 'salary' ? fetchPayrollData() : fetchHistoryData()} className="ml-4 underline font-medium">Retry</button>
+        <div className="p-6 bg-red-50 border border-red-100 rounded-2xl text-red-600 text-center shadow-sm">
+          <p className="font-semibold">{error}</p>
+          <button onClick={() => activeTab === 'salary' ? fetchPayrollData() : fetchHistoryData()} className="mt-2 text-sm font-bold underline hover:text-red-700">Try Again</button>
         </div>
       ) : (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-500">
           {activeTab === 'salary' ? renderTable(salaryData, true) : renderTable(historyData, false)}
           {((activeTab === 'salary' && salaryData.rows?.length === 0) || (activeTab === 'history' && historyData.rows?.length === 0)) && !loading && (
-            <div className="text-center py-20 text-gray-400">No records found.</div>
+            <div className="text-center py-24 bg-white/50 border border-slate-200 border-dashed rounded-2xl flex flex-col items-center">
+              <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-3">
+                <Search className="text-slate-300" size={24} />
+              </div>
+              <p className="text-slate-400 font-medium tracking-wide">No records found for the selected period.</p>
+            </div>
           )}
         </div>
       )}
 
       {showModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center p-6 border-b">
-              <h3 className="text-xl font-bold text-gray-800">Add New Payroll Entry</h3>
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white/95 backdrop-blur-2xl border border-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-white/50">
+              <h3 className="text-lg font-bold text-gray-800">Add New Payroll Entry</h3>
               <button
                 onClick={() => setShowModal(false)}
-                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                className="p-1.5 hover:bg-gray-100 rounded-full transition-colors"
               >
-                <X size={20} className="text-gray-500" />
+                <X size={18} className="text-gray-500" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-h-[60vh] overflow-y-auto px-1">
-                {/* Employee ID & Name */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Employee ID</label>
+            <form onSubmit={handleSubmit} className="p-5 md:p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[60vh] overflow-y-auto px-2 py-1 custom-scrollbar">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Employee ID</label>
                   <input
                     type="text"
                     name="employeeId"
                     value={formData.employeeId}
                     readOnly
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-gray-500 focus:outline-none"
+                    className="w-full px-3 py-2.5 bg-slate-100/50 border border-transparent rounded-xl text-sm text-slate-500 font-medium cursor-not-allowed focus:outline-none"
                     placeholder="Auto-filled"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Employee Name</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Employee Name</label>
                   <select
                     name="employeeName"
                     value={formData.employeeName}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium text-slate-700"
                     required
                   >
                     <option value="">Select Employee</option>
@@ -959,24 +1251,23 @@ const Payroll = () => {
                   </select>
                 </div>
 
-                {/* Year & Month */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Year</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Year</label>
                   <input
                     type="text"
                     name="year"
                     value={formData.year}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Month</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Month</label>
                   <select
                     name="month"
                     value={formData.month}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
                   >
                     {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map(m => (
                       <option key={m} value={m}>{m}</option>
@@ -984,143 +1275,185 @@ const Payroll = () => {
                   </select>
                 </div>
 
-                {/* Basic Salary & LTA */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Basic Salary</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Designation</label>
                   <input
-                    type="number"
-                    name="basicSalary"
-                    value={formData.basicSalary}
+                    type="text"
+                    name="designation"
+                    value={formData.designation}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
+                    placeholder="Enter Designation"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Leave Travel Allowance</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Joining Place</label>
+                  <input
+                    type="text"
+                    name="joiningPlace"
+                    value={formData.joiningPlace}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
+                    placeholder="Enter Location"
+                  />
+                </div>
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Date Of Joining</label>
+                  <div className="relative group">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
+                    <input
+                      type="text"
+                      name="dateOfJoining"
+                      value={formData.dateOfJoining}
+                      onChange={handleInputChange}
+                      className="w-full pl-9 pr-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
+                      placeholder="YYYY-MM-DD"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Monthly Salary</label>
                   <input
                     type="number"
-                    name="lta"
-                    value={formData.lta}
+                    name="monthlySalary"
+                    value={formData.monthlySalary}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
+                  />
+                </div>
+                <div className="p-4 bg-indigo-50/50 rounded-2xl col-span-full border border-indigo-100 flex flex-col gap-3 relative">
+                  <span className="absolute top-0 right-0 bg-indigo-100 text-indigo-700 text-[10px] font-black uppercase px-3 py-1 rounded-bl-xl rounded-tr-xl">Advance Status</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-indigo-400 tracking-wider">Extra Advance</label>
+                      <div className="bg-white p-2.5 rounded-xl border border-indigo-50 shadow-sm flex flex-col gap-1">
+                        <div className="flex justify-between text-xs font-semibold text-slate-500">
+                          <span>Total Taken:</span>
+                          <span className="text-slate-800">₹{advanceInfoMap[formData.employeeId]?.extra?.total?.toLocaleString() || '0'}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-bold">
+                          <span className="text-rose-500">Pending Limit:</span>
+                          <span className="text-rose-600">₹{advanceInfoMap[formData.employeeId]?.extra?.pending?.toLocaleString() || '0'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black uppercase text-indigo-400 tracking-wider">Fix Advance</label>
+                      <div className="bg-white p-2.5 rounded-xl border border-indigo-50 shadow-sm flex flex-col gap-1">
+                        <div className="flex justify-between text-xs font-semibold text-slate-500">
+                          <span>Total Taken:</span>
+                          <span className="text-slate-800">₹{advanceInfoMap[formData.employeeId]?.fix?.total?.toLocaleString() || '0'}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-bold">
+                          <span className="text-rose-500">Pending Limit:</span>
+                          <span className="text-rose-600">₹{advanceInfoMap[formData.employeeId]?.fix?.pending?.toLocaleString() || '0'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 p-3 border border-emerald-100 bg-emerald-50/30 rounded-2xl">
+                  <label className="text-xs font-semibold text-emerald-800 ml-1">Extra Adv. Deduction</label>
+                  <input
+                    type="number"
+                    name="extraAdvanceDeduction"
+                    value={formData.extraAdvanceDeduction}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2.5 bg-white border border-emerald-200 rounded-xl text-sm focus:ring-4 focus:ring-emerald-500/10 focus:border-emerald-500 outline-none transition-all shadow-sm font-bold text-emerald-700"
+                    placeholder="Enter amount"
+                  />
+                </div>
+                <div className="space-y-1.5 p-3 border border-blue-100 bg-blue-50/30 rounded-2xl">
+                  <label className="text-xs font-semibold text-blue-800 ml-1">Fix Adv. Deduction</label>
+                  <input
+                    type="number"
+                    name="fixAdvanceDeduction"
+                    value={formData.fixAdvanceDeduction}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2.5 bg-white border border-blue-200 rounded-xl text-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-bold text-blue-700"
+                    placeholder="Enter amount"
                   />
                 </div>
 
-                {/* Bonus & Other Allowance */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Bonus</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Brackage</label>
                   <input
                     type="number"
-                    name="bonus"
-                    value={formData.bonus}
+                    name="brackage"
+                    value={formData.brackage}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Other Allowance</label>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Medical</label>
                   <input
                     type="number"
-                    name="otherAllowance"
-                    value={formData.otherAllowance}
+                    name="medical"
+                    value={formData.medical}
                     onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  />
-                </div>
-
-                {/* Overtime & PF */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Overtime</label>
-                  <input
-                    type="number"
-                    name="overtime"
-                    value={formData.overtime}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">PF</label>
-                  <input
-                    type="number"
-                    name="pf"
-                    value={formData.pf}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
                   />
                 </div>
 
-                {/* Loan & Other Deduction */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Loan</label>
-                  <input
-                    type="number"
-                    name="loan"
-                    value={formData.loan}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Other Deduction</label>
-                  <input
-                    type="number"
-                    name="otherDeduction"
-                    value={formData.otherDeduction}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  />
-                </div>
-
-                {/* Status & Pay Date */}
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Status</label>
-                  <select
-                    name="status"
-                    value={formData.status}
-                    onChange={handleInputChange}
-                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                  >
-                    <option value="Draft">Draft</option>
-                    <option value="Pending">Pending</option>
-                    <option value="Paid">Paid</option>
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold text-gray-700">Pay Date</label>
-                  <div className="relative">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <div className="space-y-1.5 col-span-2">
+                  <label className="text-xs font-semibold text-slate-700 ml-1">Pay Date</label>
+                  <div className="relative group">
+                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
                     <input
                       type="date"
                       name="payDate"
                       value={formData.payDate}
                       onChange={handleInputChange}
-                      className="w-full pl-9 pr-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                      className="w-full pl-9 pr-3 py-2.5 bg-slate-50/50 border border-slate-200 rounded-xl text-sm focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-sm font-medium"
                     />
                   </div>
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 mt-8 pt-6 border-t font-medium">
+              <div className="mt-6 relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-blue-900 border border-white/10 rounded-2xl shadow-xl shadow-blue-900/20">
+                <div className="absolute top-0 right-0 p-12 bg-blue-500/10 blur-3xl rounded-full"></div>
+                <div className="absolute bottom-0 left-0 p-12 bg-indigo-500/10 blur-3xl rounded-full"></div>
+                <div className="relative p-4 px-6 flex flex-col md:flex-row items-center justify-between gap-4">
+                  <div className="space-y-0.5 z-10 text-center md:text-left">
+                    <label className="text-xs font-bold text-blue-200 uppercase tracking-widest">Total Salary</label>
+                    <p className="text-slate-400 text-xs">Net payable after all deductions</p>
+                  </div>
+                  <div className="relative group z-10">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-blue-300">₹</span>
+                    <input
+                      type="text"
+                      name="totalSalary"
+                      value={formData.totalSalary}
+                      readOnly
+                      className="w-48 pl-10 pr-4 py-2 bg-white/10 backdrop-blur-md border border-white/20 rounded-xl text-2xl font-black text-white shadow-inner outline-none transition-all text-right"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col md:flex-row justify-end gap-3 mt-6 pt-4 border-t border-slate-100 font-medium">
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-6 py-2.5 text-gray-600 hover:bg-gray-50 rounded-xl transition-all"
+                  className="px-6 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-xl transition-all"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-10 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  className="px-8 py-2 text-sm bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/30 transition-all font-semibold active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {isSubmitting ? (
                     <>
-                      <Loader2 size={18} className="animate-spin" />
+                      <Loader2 size={16} className="animate-spin" />
                       Submitting...
                     </>
                   ) : (
-                    'Submit'
+                    'Submit Entry'
                   )}
                 </button>
               </div>

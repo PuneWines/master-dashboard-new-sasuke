@@ -450,9 +450,9 @@ const fetchDepartmentData = async (department) => {
       throw new Error("Invalid data structure")
     }
 
-    // Get user info once
-    const username = sessionStorage.getItem("username") || "admin"
-    const userRole = sessionStorage.getItem("role") || "admin"
+    // Get user info once - Read from localStorage (consistent with login page)
+    const username = localStorage.getItem("user-name") || sessionStorage.getItem("username") || "admin"
+    const userRole = localStorage.getItem("role") || sessionStorage.getItem("role") || "admin"
     const isAdmin = userRole.toLowerCase().includes("admin")
     const usernameLower = username.toLowerCase()
 
