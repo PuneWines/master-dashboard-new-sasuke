@@ -112,6 +112,23 @@ const MyProfile = () => {
   const fetchJoiningData = async () => {
     try {
       const userData = JSON.parse(localStorage.getItem('user') || '{}');
+      
+      // Try multiple localStorage keys for better matching
+      const cachedId = (localStorage.getItem('employeeId') || localStorage.getItem('employee_id') || '').trim();
+      const userName = localStorage.getItem('user-name') || '';
+      
+      const userObjId = (userData.joiningNo || userData.EmployeeID || userData.employeeId || userData.empId || '').trim();
+      const searchId = (cachedId || userObjId).toString();
+      const nSearchId = normalizeId(searchId);
+      
+      // Try multiple name sources
+      const searchName = (userData.Name || userData.name || userData.candidateName || userName || userObjId || '').toString().toLowerCase().trim();
+      
+      console.log('MyProfile - Searching for user:');
+      console.log('  - Employee ID:', searchId, '(normalized:', nSearchId + ')');
+      console.log('  - User Name:', searchName);
+      console.log('  - userData from localStorage:', userData);
+      
       const response = await fetch(`${SCRIPT_URLS.HR_JOINING}?sheet=JOINING&action=fetch`);
       const result = await response.json();
       if (!result.success) throw new Error(result.error || 'Failed to fetch data');
@@ -120,10 +137,15 @@ const MyProfile = () => {
       if (rawData.length < 6) throw new Error('Insufficient data in sheet');
 
       const headers = rawData[5] || [];
+      console.log('MyProfile - JOINING sheet headers:', headers);
+      
       const getCol = (...aliases) => {
         for (const alias of aliases) {
           const idx = headers.findIndex(h => h?.toString().toLowerCase().trim() === alias.toLowerCase());
-          if (idx !== -1) return idx;
+          if (idx !== -1) {
+            console.log(`MyProfile - Found column "${alias}" at index: ${idx}`);
+            return idx;
+          }
         }
         return -1;
       };
@@ -153,28 +175,47 @@ const MyProfile = () => {
         aadharCardNo:       getCol('Aadhar Card No', 'Aadhar No', 'Aadhaar No', 'Aadhar Number'),
       };
 
-      const dataRows = rawData.slice(6);
-
-      const cachedId   = (localStorage.getItem('employeeId') || '').trim();
-      const userObjId  = (userData.joiningNo || userData.EmployeeID || userData.employeeId || userData.empId || '').trim();
-      const searchId   = (cachedId || userObjId).toString();
-      const nSearchId  = normalizeId(searchId);
+      console.log('MyProfile - Column map:', colMap);
       
-      const searchName = (userData.Name || userData.name || userData.candidateName || userObjId || '').toString().toLowerCase().trim();
+      // Fallback: If candidatePhoto column not found by name, use index 12 (Column M)
+      if (colMap.candidatePhoto === -1) {
+        console.warn('MyProfile - Candidate Photo column not found by name, using index 12 (Column M) as fallback');
+        colMap.candidatePhoto = 12;
+      }
 
-      const foundIndex = dataRows.findIndex(row => {
+      const dataRows = rawData.slice(6);
+      console.log('MyProfile - Total data rows:', dataRows.length);
+
+      const foundIndex = dataRows.findIndex((row, index) => {
         const rowIdRaw = (colMap.joiningNo !== -1 ? row[colMap.joiningNo] : '') || '';
-        const rowId    = rowIdRaw.toString().trim();
-        const rowName  = (colMap.candidateName !== -1 ? row[colMap.candidateName] : '')?.toString().toLowerCase().trim() || '';
+        const rowId = rowIdRaw.toString().trim();
+        const rowName = (colMap.candidateName !== -1 ? row[colMap.candidateName] : '')?.toString().toLowerCase().trim() || '';
 
-        const sameId   = nSearchId && normalizeId(rowId) === nSearchId;
+        const sameId = nSearchId && normalizeId(rowId) === nSearchId;
         const sameName = searchName && (rowName === searchName || rowName.includes(searchName) || searchName.includes(rowName));
+
+        if (sameId || sameName) {
+          console.log(`MyProfile - Matched at row index ${index}:`, {
+            rowId,
+            rowName,
+            searchedId: searchId,
+            searchedName: searchName
+          });
+        }
 
         return sameId || sameName;
       });
 
       if (foundIndex !== -1) {
         const row = dataRows[foundIndex];
+        console.log('MyProfile - Found row data:', row);
+        
+        // Get raw photo URL from column M (index 12)
+        const rawPhotoUrl = (colMap.candidatePhoto !== -1 ? row[colMap.candidatePhoto] : '') || '';
+        console.log('MyProfile - Photo extraction:');
+        console.log('  - Column index used:', colMap.candidatePhoto);
+        console.log('  - Raw URL from sheet:', rawPhotoUrl);
+        
         const profile = {
           joiningNo:          (colMap.joiningNo !== -1 ? row[colMap.joiningNo] : '') || '',
           candidateName:      (colMap.candidateName !== -1 ? row[colMap.candidateName] : '') || '',
@@ -183,7 +224,7 @@ const MyProfile = () => {
           joiningPlace:       (colMap.joiningPlace !== -1 ? row[colMap.joiningPlace] : '') || '',
           designation:        (colMap.designation !== -1 ? row[colMap.designation] : '') || '',
           salary:             (colMap.salary !== -1 ? row[colMap.salary] : '') || '',
-          candidatePhoto:     getDirectDriveLink((colMap.candidatePhoto !== -1 ? row[colMap.candidatePhoto] : '') || ''),
+          candidatePhoto:     getDirectDriveLink(rawPhotoUrl),
           currentAddress:     (colMap.currentAddress !== -1 ? row[colMap.currentAddress] : '') || '',
           addressAsPerAadhar: (colMap.addressAsPerAadhar !== -1 ? row[colMap.addressAsPerAadhar] : '') || '',
           bodAsPerAadhar:     formatDate((colMap.bodAsPerAadhar !== -1 ? row[colMap.bodAsPerAadhar] : '')),
@@ -199,18 +240,32 @@ const MyProfile = () => {
           esicNo:             (colMap.esicNo !== -1 ? row[colMap.esicNo] : '') || '',
           aadharCardNo:       (colMap.aadharCardNo !== -1 ? row[colMap.aadharCardNo] : '') || '',
         };
+        
+        console.log('MyProfile - Final profile data:');
+        console.log('  - Name:', profile.candidateName);
+        console.log('  - Employee ID:', profile.joiningNo);
+        console.log('  - Photo URL (converted):', profile.candidatePhoto);
+        
         setProfileData(profile);
         setFormData(profile);
         setRowIndex(foundIndex + 7);
         setIsDemo(false);
         if (profile.joiningNo) localStorage.setItem("employeeId", profile.joiningNo);
       } else {
+        console.error('MyProfile - No matching user found in JOINING sheet!');
+        console.error('Searched for - ID:', searchId, 'Name:', searchName);
+        console.error('Available IDs in sheet:', dataRows.map(row => {
+          const id = colMap.joiningNo !== -1 ? row[colMap.joiningNo] : '';
+          const name = colMap.candidateName !== -1 ? row[colMap.candidateName] : '';
+          return `${id} (${name})`;
+        }));
+        
         setProfileData(DUMMY_PROFILE);
         setFormData(DUMMY_PROFILE);
         setIsDemo(true);
       }
     } catch (error) {
-      console.error('Error fetching profile:', error);
+      console.error('MyProfile - Error fetching profile:', error);
       toast.error(`Failed to load profile: ${error.message}`);
     } finally {
       setLoading(false);

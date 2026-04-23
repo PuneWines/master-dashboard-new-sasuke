@@ -17,6 +17,16 @@ const DEVICES = [
     { name: 'MUMBAI', apiName: 'MUMBAI', serial: 'C2630450C32A2327' }
 ];
 
+// Convert Google Drive link to direct display link
+const getDirectDriveLink = (url) => {
+    if (!url || typeof url !== 'string' || url.trim() === '' || url === '-') return '';
+    const idMatch = url.match(/(?:id=|\/d\/)([a-zA-Z0-9_-]+)/);
+    if (idMatch && (url.includes('drive.google.com') || url.includes('docs.google.com'))) {
+        return `https://lh3.googleusercontent.com/d/${idMatch[1]}`;
+    }
+    return url;
+};
+
 const HomePage = () => {
     const [userDetails, setUserDetails] = useState(null);
     const [allUsers, setAllUsers] = useState([]);
@@ -356,7 +366,8 @@ const HomePage = () => {
                         joiningData = dataRows.map(r => ({
                             id: r[getIdx('Employee ID')]?.toString().trim(),
                             name: r[getIdx('Name As Per Aadhar')]?.toString().trim(),
-                            designation: r[getIdx('Designation')]?.toString().trim()
+                            designation: r[getIdx('Designation')]?.toString().trim(),
+                            photo: r[getIdx('Candidate Photo')]?.toString().trim() || r[getIdx('Photo')]?.toString().trim() || ''
                         })).filter(h => h.id);
                     }
                 }
@@ -566,8 +577,101 @@ const HomePage = () => {
                     matchedUser = users.find(u => u?.user_name?.toLowerCase() === storedUsername.toLowerCase());
                 }
 
+                // Fetch candidate photo from JOINING sheet
+                let candidatePhoto = '';
+                try {
+                    // Get all possible user identifiers (same as MyProfile)
+                    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+                    const cachedId = (localStorage.getItem('employeeId') || localStorage.getItem('employee_id') || '').trim();
+                    const userName = localStorage.getItem('user-name') || '';
+                    const userObjId = (userData.joiningNo || userData.EmployeeID || userData.employeeId || userData.empId || '').trim();
+                    const searchId = (cachedId || userObjId || storedEmpId).toString();
+                    const nSearchId = normalizeId(searchId);
+                    const searchName = (userData.Name || userData.name || userData.candidateName || userName || storedUsername || '').toString().toLowerCase().trim();
+                    
+                    console.log('HomePage - Searching for user photo:');
+                    console.log('  - Employee ID:', searchId, '(normalized:', nSearchId + ')');
+                    console.log('  - User Name:', searchName);
+                    
+                    const jRes = await fetch(`${SCRIPT_URLS.HR_JOINING}?sheet=JOINING&action=fetch`);
+                    if (jRes.ok) {
+                        const jData = await jRes.json();
+                        if (jData.success) {
+                            const raw = jData.data;
+                            if (raw.length >= 6) {
+                                const headers = raw[5];
+                                const dataRows = raw.slice(6);
+                                
+                                console.log('HomePage - JOINING sheet headers:', headers);
+                                
+                                const getIdx = (...aliases) => {
+                                    for (const alias of aliases) {
+                                        const idx = headers.findIndex(h => h?.toString().toLowerCase().trim() === alias.toLowerCase());
+                                        if (idx !== -1) {
+                                            console.log(`HomePage - Found column "${alias}" at index: ${idx}`);
+                                            return idx;
+                                        }
+                                    }
+                                    return -1;
+                                };
+                                
+                                const colMap = {
+                                    joiningNo: getIdx('Joining No', 'Employee ID', 'Emp ID', 'EmpID'),
+                                    candidateName: getIdx('Candidate Name', 'Name As Per Aadhar', 'Name', 'Employee Name', 'Full Name'),
+                                    candidatePhoto: getIdx('Candidate Photo', 'Photo', 'Profile Photo', 'Image', 'Emp Photo', 'Employee Photo'),
+                                };
+                                
+                                console.log('HomePage - Column map:', colMap);
+                                
+                                // Fallback: If candidatePhoto column not found by name, use index 12 (Column M)
+                                if (colMap.candidatePhoto === -1) {
+                                    console.warn('HomePage - Candidate Photo column not found by name, using index 12 (Column M) as fallback');
+                                    colMap.candidatePhoto = 12;
+                                }
+                                
+                                // Find user row
+                                const userPhotoData = dataRows.find((row, index) => {
+                                    const rowIdRaw = (colMap.joiningNo !== -1 ? row[colMap.joiningNo] : '') || '';
+                                    const rowId = rowIdRaw.toString().trim();
+                                    const rowName = (colMap.candidateName !== -1 ? row[colMap.candidateName] : '')?.toString().toLowerCase().trim() || '';
+                                    const nRowEmpId = normalizeId(rowId);
+                                    
+                                    const sameId = nSearchId && nRowEmpId === nSearchId;
+                                    const sameName = searchName && (rowName === searchName || rowName.includes(searchName) || searchName.includes(rowName));
+                                    
+                                    if (sameId || sameName) {
+                                        console.log(`HomePage - Matched at row index ${index}:`, {
+                                            rowId,
+                                            rowName,
+                                            searchedId: searchId,
+                                            searchedName: searchName
+                                        });
+                                    }
+                                    
+                                    return sameId || sameName;
+                                });
+                                
+                                if (userPhotoData) {
+                                    const rawPhotoUrl = (colMap.candidatePhoto !== -1 ? userPhotoData[colMap.candidatePhoto] : '') || '';
+                                    console.log('HomePage - Photo extraction:');
+                                    console.log('  - Column index used:', colMap.candidatePhoto);
+                                    console.log('  - Raw URL from sheet:', rawPhotoUrl);
+                                    
+                                    candidatePhoto = getDirectDriveLink(rawPhotoUrl);
+                                    console.log('HomePage - Photo URL (converted):', candidatePhoto);
+                                } else {
+                                    console.error('HomePage - No matching user found in JOINING sheet!');
+                                    console.error('Searched for - ID:', searchId, 'Name:', searchName);
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { 
+                    console.error("HomePage - Could not fetch candidate photo from JOINING sheet:", e);
+                }
+
                 if (matchedUser) {
-                    setUserDetails({ ...matchedUser, status: "active" });
+                    setUserDetails({ ...matchedUser, status: "active", candidatePhoto });
                 } else if (storedUsername && storedEmpId) {
                     // Fallback to localStorage if not found in list
                     setUserDetails({
@@ -578,10 +682,11 @@ const HomePage = () => {
                         role: localStorage.getItem("role"),
                         status: "active",
                         designation: localStorage.getItem("role") === "admin" ? "Admin" : "Employee",
-                        department: "Department N/A"
+                        department: "Department N/A",
+                        candidatePhoto
                     });
                 } else {
-                    setUserDetails(users[0]);
+                    setUserDetails({ ...users[0], candidatePhoto });
                 }
 
                 const attendanceRes = await fetchAttendanceSummaryApi();
@@ -669,14 +774,18 @@ const HomePage = () => {
                                             <div className="w-36 h-36 rounded-full p-1 bg-white shadow-2xl ring-4 ring-white group-hover:scale-105 transition-transform duration-300">
                                                 <img
                                                     src={
-                                                        userDetails?.employee_id
-                                                            ? `/employees/${userDetails.employee_id}.jpg`
-                                                            : "/user.png"
+                                                        userDetails?.candidatePhoto
+                                                            ? userDetails.candidatePhoto
+                                                            : userDetails?.employee_id
+                                                                ? `/employees/${userDetails.employee_id}.jpg`
+                                                                : "/user.png"
                                                     }
                                                     alt="Employee"
                                                     className="w-full h-full rounded-full object-cover"
                                                     onError={(e) => {
-                                                        e.target.src = "/user.png";
+                                                        e.target.src = userDetails?.employee_id
+                                                            ? `/employees/${userDetails.employee_id}.jpg`
+                                                            : "/user.png";
                                                     }}
                                                 />
                                             </div>
