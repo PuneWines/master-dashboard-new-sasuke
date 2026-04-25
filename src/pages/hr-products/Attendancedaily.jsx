@@ -449,22 +449,10 @@ const Attendancedaily = () => {
         let outTime = '-';
         let lunchOut = '-';
         let lunchIn = '-';
-        let punchMiss = 'No';
-        let punchMissMsg = '';
 
         if (logs.length === 1) {
-          const punchTime = logs[0];
-          const timePart = punchTime.split(' ')[1] || '';
-          const hours = parseInt(timePart.split(':')[0]) || 0;
-
-          punchMiss = 'Yes';
-          if (hours >= 15) { // 3:00 PM cutoff for evening punch
-            outTime = punchTime;
-            punchMissMsg = 'Morning Punch Miss';
-          } else {
-            inTime = punchTime;
-            punchMissMsg = 'Evening Punch Miss';
-          }
+          // Single punch - treat as in-time only
+          inTime = logs[0];
         } else {
           inTime = logs[0];
           outTime = logs[logs.length - 1];
@@ -503,8 +491,8 @@ const Attendancedaily = () => {
         const displayAssignedSerial = dMap ? dMap.serialNo : serial;
 
 
-        const lateMins = (punchMiss === 'Yes' && punchMissMsg === 'Morning Punch Miss') ? 'MISS' : calculateLateMinutes(inTime);
-        const workHrs = punchMiss === 'Yes' ? '0h 0m' : calculateWorkHours(inTime, outTime);
+        const lateMins = calculateLateMinutes(inTime);
+        const workHrs = (inTime === '-' || outTime === '-') ? '0h 0m' : calculateWorkHours(inTime, outTime);
         const overtimeHrs = calculateOvertime(workHrs);
 
         // LUNCH & WASTE TIME LOGIC
@@ -540,24 +528,19 @@ const Attendancedaily = () => {
         if (holiday) {
           status = 'PRESENT';
           statusReason = `Holiday: ${holiday.name}`;
-        } else if (punchMiss === 'Yes') {
-          if (isToday) {
-            if (punchMissMsg === 'Morning Punch Miss') {
-              status = 'ABSENT';
-              statusReason = punchMissMsg;
+        } else if (inTime === '-' || outTime === '-') {
+          // Missing punch - mark as absent
+          if (isToday && inTime !== '-' && outTime === '-') {
+            // Today with only in-time - still working
+            if (lateMins > 0) {
+              status = 'LET';
+              statusReason = `Late arrival: ${lateMins} min`;
             } else {
-              // Evening punch miss on Today is normal (they are still working)
-              if (lateMins > 0) {
-                status = 'LET';
-                statusReason = `Late arrival: ${lateMins} min`;
-              } else {
-                status = 'PRESENT';
-              }
+              status = 'PRESENT';
             }
           } else {
-            // Past date with missing punch is ABSENT
             status = 'ABSENT';
-            statusReason = punchMissMsg;
+            statusReason = 'Incomplete punch record';
           }
         } else {
           // Both punches present
@@ -613,8 +596,8 @@ const Attendancedaily = () => {
           WorkingHour: workHrs,
           Overtime: overtimeHrs,
           LateMinute: lateMins,
-          PunchMiss: punchMiss,
-          PunchMissMsg: punchMissMsg
+          PunchMiss: (inTime === '-' || outTime === '-') ? 'Yes' : 'No',
+          PunchMissMsg: (inTime === '-' || outTime === '-') ? 'Incomplete punch record' : ''
         };
       });
 
