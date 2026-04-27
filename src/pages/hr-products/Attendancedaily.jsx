@@ -185,10 +185,14 @@ const Attendancedaily = () => {
 
       const officialStartTime = 10 * 60 + 0; // 10:00 AM
       const graceTimeThreshold = 10 * 60 + 10; // 10:10 AM
+      const lateCutoffTime = 12 * 60 + 0; // 12:00 PM
 
-      if (totalMinutes > graceTimeThreshold) {
+      // 1 Condtion: 10:00 AM to 12:00 PM
+      if (totalMinutes > graceTimeThreshold && totalMinutes <= lateCutoffTime) {
         return totalMinutes - officialStartTime;
       }
+      
+      // 2 Condtion: After 12:00 PM - No late time added
       return 0;
     } catch (e) {
       return 0;
@@ -449,23 +453,20 @@ const Attendancedaily = () => {
         let outTime = '-';
         let lunchOut = '-';
         let lunchIn = '-';
-        let punchMiss = 'No';
-        let punchMissMsg = '';
 
         if (logs.length === 1) {
           const punchTime = logs[0];
           const timePart = punchTime.split(' ')[1] || '';
           const hours = parseInt(timePart.split(':')[0]) || 0;
-
-          punchMiss = 'Yes';
-          if (hours >= 15) { // 3:00 PM cutoff for evening punch
-            outTime = punchTime;
-            punchMissMsg = 'Morning Punch Miss';
+          // If single punch is 3 PM or later, it's likely an OUT punch (Morning Missed)
+          if (hours >= 15) {
+            inTime = '-';
+            outTime = logs[0];
           } else {
-            inTime = punchTime;
-            punchMissMsg = 'Evening Punch Miss';
+            inTime = logs[0];
+            outTime = '-';
           }
-        } else {
+        } else if (logs.length > 1) {
           inTime = logs[0];
           outTime = logs[logs.length - 1];
           if (logs.length >= 4) {
@@ -503,8 +504,8 @@ const Attendancedaily = () => {
         const displayAssignedSerial = dMap ? dMap.serialNo : serial;
 
 
-        const lateMins = (punchMiss === 'Yes' && punchMissMsg === 'Morning Punch Miss') ? 'MISS' : calculateLateMinutes(inTime);
-        const workHrs = punchMiss === 'Yes' ? '0h 0m' : calculateWorkHours(inTime, outTime);
+        const lateMins = calculateLateMinutes(inTime);
+        const workHrs = (inTime === '-' || outTime === '-') ? '0h 0m' : calculateWorkHours(inTime, outTime);
         const overtimeHrs = calculateOvertime(workHrs);
 
         // LUNCH & WASTE TIME LOGIC
@@ -540,24 +541,19 @@ const Attendancedaily = () => {
         if (holiday) {
           status = 'PRESENT';
           statusReason = `Holiday: ${holiday.name}`;
-        } else if (punchMiss === 'Yes') {
-          if (isToday) {
-            if (punchMissMsg === 'Morning Punch Miss') {
-              status = 'ABSENT';
-              statusReason = punchMissMsg;
+        } else if (inTime === '-' || outTime === '-') {
+          // Missing punch - mark as absent
+          if (isToday && inTime !== '-' && outTime === '-') {
+            // Today with only in-time - still working
+            if (lateMins > 0) {
+              status = 'LET';
+              statusReason = `Late arrival: ${lateMins} min`;
             } else {
-              // Evening punch miss on Today is normal (they are still working)
-              if (lateMins > 0) {
-                status = 'LET';
-                statusReason = `Late arrival: ${lateMins} min`;
-              } else {
-                status = 'PRESENT';
-              }
+              status = 'PRESENT';
             }
           } else {
-            // Past date with missing punch is ABSENT
             status = 'ABSENT';
-            statusReason = punchMissMsg;
+            statusReason = 'Incomplete punch record';
           }
         } else {
           // Both punches present
@@ -613,8 +609,9 @@ const Attendancedaily = () => {
           WorkingHour: workHrs,
           Overtime: overtimeHrs,
           LateMinute: lateMins,
-          PunchMiss: punchMiss,
-          PunchMissMsg: punchMissMsg
+          PunchMiss: (inTime === '-' || outTime === '-') && !(inTime === '-' && outTime === '-') ? 'Yes' : 'No',
+          PunchMissMsg: inTime === '-' && outTime !== '-' ? 'Morning Punch Miss' : 
+                        inTime !== '-' && outTime === '-' ? 'Evening Punch Miss' : ''
         };
       });
 
@@ -1117,7 +1114,9 @@ const Attendancedaily = () => {
                     <td className="px-4 py-3 whitespace-nowrap text-center text-xs font-semibold text-gray-700">{item.WorkingHour}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-center text-[10px] font-semibold text-red-500">{item.LateMinute === 'MISS' ? 'MISS' : item.LateMinute > 0 ? `${item.LateMinute} min` : '-'}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-center">
-                      <span className={`text-[10px] font-bold ${item.PunchMiss === 'Yes' ? 'text-red-600' : 'text-gray-400'}`}>{item.PunchMiss}</span>
+                      <span className={`text-[9px] font-bold ${item.PunchMiss === 'Yes' ? 'text-red-600' : 'text-gray-400'}`}>
+                        {item.PunchMiss === 'Yes' ? item.PunchMissMsg : 'No'}
+                      </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-[10px] font-semibold text-gray-600">{item.StoreName || '-'}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-[10px] font-semibold text-indigo-600">{item.DeviceID || '-'}</td>

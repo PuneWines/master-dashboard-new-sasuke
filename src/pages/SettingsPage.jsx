@@ -70,7 +70,8 @@ const SettingsPage = () => {
     master_page_access: [],
     tab_system_access: {},
     email_id: '',
-    number: ''
+    number: '',
+    status: 'Active'
   };
 
   const [formData, setFormData] = useState(initialFormState);
@@ -215,6 +216,7 @@ const SettingsPage = () => {
                     <th className="px-4 py-4 whitespace-nowrap bg-gray-50">Login ID</th>
                     <th className="px-4 py-4 whitespace-nowrap bg-gray-50">Password</th>
                     <th className="px-4 py-4 whitespace-nowrap bg-gray-50">Role</th>
+                    <th className="px-4 py-4 whitespace-nowrap bg-gray-50">Work Status</th>
                     <th className="px-4 py-4 whitespace-nowrap bg-gray-50">Master Page Access</th>
                     <th className="px-4 py-4 whitespace-nowrap min-w-[200px] bg-gray-50">Tab System Access</th>
                     <th className="px-4 py-4 whitespace-nowrap bg-gray-50">Gmail ID</th>
@@ -258,6 +260,13 @@ const SettingsPage = () => {
                           user.role === 'admin' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-blue-100 text-blue-700 border border-blue-200'
                         }`}>
                           {user.role || 'Employee'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          user.status === 'Inactive' ? 'bg-red-100 text-red-700 border border-red-200' : 'bg-green-100 text-green-700 border border-green-200'
+                        }`}>
+                          {user.status || 'Active'}
                         </span>
                       </td>
                       <td className="px-4 py-4">
@@ -433,7 +442,7 @@ const SettingsPage = () => {
                       <Briefcase className="w-5 h-5" />
                       <h3 className="font-bold text-lg">Role & Position</h3>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div className="space-y-1.5">
                         <label className="text-sm font-bold text-gray-600 px-1 italic">Role Type</label>
                         <select 
@@ -486,6 +495,23 @@ const SettingsPage = () => {
                           value={formData.designation}
                           onChange={(e) => setFormData({...formData, designation: e.target.value})}
                         />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-sm font-bold text-gray-600 px-1 italic">
+                          Work Status
+                        </label>
+                        <select 
+                          className={`w-full border-2 p-3 rounded-xl focus:ring-2 outline-none transition cursor-pointer appearance-none font-bold ${
+                            formData.status === 'Inactive'
+                              ? 'bg-red-50 border-red-300 text-red-700 focus:ring-red-300/30 focus:border-red-500'
+                              : 'bg-green-50 border-green-300 text-green-700 focus:ring-green-300/30 focus:border-green-500'
+                          }`}
+                          value={formData.status || 'Active'}
+                          onChange={(e) => setFormData({...formData, status: e.target.value})}
+                        >
+                          <option value="Active">✅ Active</option>
+                          <option value="Inactive">🔴 Inactive</option>
+                        </select>
                       </div>
                     </div>
                   </section>

@@ -79,7 +79,9 @@ export const fetchUserDetailsApi = async () => {
                 master_page_access: Array.isArray(user.master_page_access) ? user.master_page_access : [],
                 tab_system_access:  (user.tab_system_access && typeof user.tab_system_access === 'object')
                                         ? user.tab_system_access
-                                        : {}
+                                        : {},
+                admin_photo:        user.admin_photo || user['Admin Photo'] || user.AdminPhoto || user['admin photo'] || "",
+                status:             user.status || user['Status'] || user.work_status || "Active"
             }));
         }
 
@@ -113,7 +115,8 @@ export const createUserApi = async (formData) => {
                 tab_system_access:  formData.tab_system_access || {},
                 shops_name:         formData.shops_name   || "",
                 email_id:           formData.email_id     || "",
-                number:             formData.number       || ""
+                number:             formData.number       || "",
+                status:             formData.status       || "Active"
             }
         });
 
@@ -213,7 +216,9 @@ export const updateUserDataApi = async ({ id, updatedUser }) => {
                 tab_system_access:  updatedUser.tab_system_access || {},
                 shops_name:         updatedUser.shops_name   || "",
                 email_id:           updatedUser.email_id     || "",
-                number:             updatedUser.number       || ""
+                number:             updatedUser.number       || "",
+                admin_photo:        updatedUser.admin_photo  || "",
+                status:             updatedUser.status       || "Active"
             }
         });
 

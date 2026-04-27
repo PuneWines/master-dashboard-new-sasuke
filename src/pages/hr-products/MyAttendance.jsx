@@ -348,7 +348,15 @@ const MyAttendance = () => {
                     status = 'Clocked In';
                   }
                 } else if (!fullOut) {
-                   status = 'Punch Miss';
+                   // Missing out punch - calculate until end of day or mark appropriately
+                   const startTime = new Date(fullIn.replace(/-/g, '/')).getTime();
+                   if (!isNaN(startTime)) {
+                     // Set end of day time for calculation
+                     const endDate = new Date(fullIn.replace(/-/g, '/'));
+                     endDate.setHours(23, 59, 59, 999);
+                     workSecs = (endDate.getTime() - startTime) / 1000;
+                     status = 'Present';
+                   }
                 }
 
                 if (fullOut) {

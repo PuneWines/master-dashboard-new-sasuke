@@ -1,8 +1,8 @@
-import { useState, useEffect } from "react"
-import { fetchUserDetailsApi, patchSystemAccessApi } from "../redux/api/settingApi";
+import React, { useState, useEffect, useRef } from "react"
+import { fetchUserDetailsApi, patchSystemAccessApi, updateUserDataApi } from "../redux/api/settingApi";
 import { fetchSystemsApi } from "../redux/api/systemsApi";
 import { fetchAttendanceSummaryApi } from "../redux/api/attendenceApi";
-import { Award, Target, ListTodo, Clock, CheckCircle2, Search, Filter, Download, ChevronDown, X, User, Activity, Timer } from "lucide-react";
+import { Award, Target, ListTodo, Clock, CheckCircle2, Search, Filter, Download, ChevronDown, X, User, Activity, Timer, Upload } from "lucide-react";
 import searchIcon from "../assets/search-icon-logo.png";
 import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../utils/envConfig';
 
@@ -49,6 +49,10 @@ const HomePage = () => {
     const [loadingBiometric, setLoadingBiometric] = useState(false);
     const [selectedDevice, setSelectedDevice] = useState(DEVICES[0]);
     const [biometricStats, setBiometricStats] = useState(null);
+
+    // Photo Upload State
+    const fileInputRef = useRef(null);
+    const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
     // Update employee filter when department changes
     useEffect(() => {
@@ -206,10 +210,11 @@ const HomePage = () => {
                 }
             }
 
-            // Cleanup: unique and filtered
+            // Cleanup: unique and filtered — block status words and reserved names from being used as sheet names
+            const RESERVED_WORDS = ["Select Department", "DELEGATION", "MASTER", "Active", "Inactive", "active", "inactive", "ACTIVE", "INACTIVE", ""];
             accessibleDepartments = [...new Set(accessibleDepartments)]
                 .map(d => d.trim())
-                .filter(d => d && d !== "Select Department" && d !== "DELEGATION" && d !== "MASTER");
+                .filter(d => d && !RESERVED_WORDS.includes(d));
 
             console.log("Fetching tasks for departments:", accessibleDepartments);
             console.log("Current user:", username, "Role:", userRole, "Is Admin:", isAdmin);
@@ -577,11 +582,60 @@ const HomePage = () => {
                     matchedUser = users.find(u => u?.user_name?.toLowerCase() === storedUsername.toLowerCase());
                 }
 
-                // Fetch candidate photo from JOINING sheet
+                // Fetch candidate photo (from Master Login for Admin, or JOINING sheet for regular users)
                 let candidatePhoto = '';
+                const role = localStorage.getItem("role") || "";
+                const isAdmin = role.toLowerCase().includes("admin");
+
                 try {
-                    // Get all possible user identifiers (same as MyProfile)
-                    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+                    if (isAdmin) {
+                        console.log("HomePage - Admin detected, fetching photo from Master Login");
+                        if (matchedUser && matchedUser.admin_photo) {
+                            console.log("HomePage - Found admin photo in user details:", matchedUser.admin_photo);
+                            candidatePhoto = getDirectDriveLink(matchedUser.admin_photo);
+                        } else {
+                            // Fallback: Fetch directly from the sheet
+                            try {
+                                const adminRes = await fetch(`${SCRIPT_URLS.MASTER_LOGIN}?action=fetch`);
+                                if (adminRes.ok) {
+                                    const adminData = await adminRes.json();
+                                    if (adminData.success && adminData.data) {
+                                        const raw = adminData.data;
+                                        // Header is usually row 0
+                                        const headers = raw[0] || [];
+                                        const photoIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'admin photo');
+                                        const idIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'emp id');
+                                        
+                                        if (photoIdx !== -1 && idIdx !== -1) {
+                                            const adminRow = raw.slice(1).find(r => normalizeId(r[idIdx]) === normalizeId(storedEmpId));
+                                            if (adminRow && adminRow[photoIdx]) {
+                                                console.log("HomePage - Admin Photo URL found in Master Login sheet:", adminRow[photoIdx]);
+                                                candidatePhoto = getDirectDriveLink(adminRow[photoIdx].toString().trim());
+                                            }
+                                        } else {
+                                            // Maybe there's a header at row 1 instead
+                                            const headers2 = raw[1] || [];
+                                            const photoIdx2 = headers2.findIndex(h => h && h.toString().toLowerCase().trim() === 'admin photo');
+                                            const idIdx2 = headers2.findIndex(h => h && h.toString().toLowerCase().trim() === 'emp id');
+                                            if (photoIdx2 !== -1 && idIdx2 !== -1) {
+                                                const adminRow = raw.slice(2).find(r => normalizeId(r[idIdx2]) === normalizeId(storedEmpId));
+                                                if (adminRow && adminRow[photoIdx2]) {
+                                                    console.log("HomePage - Admin Photo URL found in Master Login sheet:", adminRow[photoIdx2]);
+                                                    candidatePhoto = getDirectDriveLink(adminRow[photoIdx2].toString().trim());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (e) {
+                                console.error("Failed to fetch admin photo from master login sheet", e);
+                            }
+                        }
+                    }
+
+                    if (!candidatePhoto) {
+                        // Get all possible user identifiers (same as MyProfile)
+                        const userData = JSON.parse(localStorage.getItem('user') || '{}');
                     const cachedId = (localStorage.getItem('employeeId') || localStorage.getItem('employee_id') || '').trim();
                     const userName = localStorage.getItem('user-name') || '';
                     const userObjId = (userData.joiningNo || userData.EmployeeID || userData.employeeId || userData.empId || '').trim();
@@ -666,6 +720,7 @@ const HomePage = () => {
                             }
                         }
                     }
+                    } // Closing if (!candidatePhoto)
                 } catch (e) { 
                     console.error("HomePage - Could not fetch candidate photo from JOINING sheet:", e);
                 }
@@ -753,6 +808,131 @@ const HomePage = () => {
         return matchesSearch && matchesDept && matchesAttendance;
     });
 
+    const handlePhotoClick = () => {
+        const isAdmin = localStorage.getItem("role")?.toLowerCase().includes("admin");
+        if (isAdmin && fileInputRef.current && !isUploadingPhoto) {
+            fileInputRef.current.click();
+        }
+    };
+
+    const handlePhotoFileChange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setIsUploadingPhoto(true);
+        try {
+            // Compress and convert to base64
+            const reader = new FileReader();
+            const fileData = await new Promise((resolve, reject) => {
+                reader.onload = () => resolve({ base64: reader.result, type: file.type });
+                reader.onerror = error => reject(error);
+                reader.readAsDataURL(file);
+            });
+
+            if (!fileData || !fileData.base64) throw new Error('Failed to convert file to base64');
+
+            const safeName = file.name ? file.name.replace(/[^a-zA-Z0-9._-]/g, '_') : 'admin_photo.jpg';
+
+            const params = new URLSearchParams();
+            params.append('action', 'uploadFile');
+            params.append('sheetName', 'MASTER'); // Dummy to prevent crash
+            params.append('base64Data', fileData.base64);
+            params.append('fileName', `ADMIN_${localStorage.getItem("employee_id")}_${safeName}`);
+            params.append('mimeType', fileData.type || 'image/jpeg');
+            params.append('folderId', '145FIQRxwN_omuW2XPHx-Bbk8kFOpzosd'); // Candidate Photos folder
+
+            const response = await fetch(SCRIPT_URLS.HR_JOINING, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params.toString(),
+            });
+
+            const result = await response.json();
+            
+            let finalUrl = result.fileUrl;
+            if (finalUrl) {
+                if (typeof finalUrl === 'object') {
+                    finalUrl = finalUrl.fileUrl || finalUrl;
+                } else if (typeof finalUrl === 'string' && finalUrl.startsWith('{') && finalUrl.includes('fileUrl=')) {
+                    const match = finalUrl.match(/fileUrl=([^,}]+)/);
+                    if (match && match[1]) finalUrl = match[1].trim();
+                }
+            }
+
+            if (result.success && finalUrl) {
+                const empId = localStorage.getItem("employee_id");
+                
+                // Fallback direct update to Master Login sheet using updateCell
+                try {
+                    const adminRes = await fetch(`${SCRIPT_URLS.MASTER_LOGIN}?action=fetch`);
+                    if (adminRes.ok) {
+                        const adminData = await adminRes.json();
+                        if (adminData.success && adminData.data) {
+                            const raw = adminData.data;
+                            let headers = raw[0] || [];
+                            let photoIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'admin photo');
+                            let idIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'emp id');
+                            let rowIndex = -1;
+
+                            if (photoIdx !== -1 && idIdx !== -1) {
+                                rowIndex = raw.findIndex((r, idx) => idx > 0 && r[idIdx]?.toString().trim() === empId);
+                            } else {
+                                headers = raw[1] || [];
+                                photoIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'admin photo');
+                                idIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'emp id');
+                                if (photoIdx !== -1 && idIdx !== -1) {
+                                    rowIndex = raw.findIndex((r, idx) => idx > 1 && r[idIdx]?.toString().trim() === empId);
+                                }
+                            }
+
+                            if (rowIndex !== -1) {
+                                const updateRes = await fetch(SCRIPT_URLS.MASTER_LOGIN, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                    body: new URLSearchParams({
+                                        sheetName: 'Master Login', // Assuming the sheet is named Master Login
+                                        action: 'updateCell',
+                                        rowIndex: (rowIndex + 1).toString(), // 1-indexed
+                                        columnIndex: (photoIdx + 1).toString(), // 1-indexed
+                                        value: finalUrl
+                                    })
+                                });
+                                // Ignored error if updateCell is not supported, we just try
+                            }
+                        }
+                    }
+                } catch(e) {
+                    console.error("Direct update error:", e);
+                }
+
+                // Update the user details via updateUserDataApi (robust)
+                if (userDetails && userDetails.id) {
+                    const updatedUser = { ...userDetails, admin_photo: finalUrl };
+                    const updateRes = await updateUserDataApi({ id: userDetails.id, updatedUser });
+                    if (updateRes.success) {
+                        setUserDetails(prev => ({ ...prev, candidatePhoto: getDirectDriveLink(finalUrl) }));
+                        alert('Photo updated successfully!');
+                    } else {
+                        // We still show the new photo locally
+                        setUserDetails(prev => ({ ...prev, candidatePhoto: getDirectDriveLink(finalUrl) }));
+                        alert('Photo updated! Refresh to see if changes persist.');
+                    }
+                } else {
+                    setUserDetails(prev => ({ ...prev, candidatePhoto: getDirectDriveLink(finalUrl) }));
+                    alert('Photo updated locally. Profile update API skipped due to missing user ID.');
+                }
+            } else {
+                throw new Error(result.error || 'File upload failed');
+            }
+        } catch (error) {
+            console.error('Error uploading photo:', error);
+            alert('Error uploading photo: ' + error.message);
+        } finally {
+            setIsUploadingPhoto(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
     return (
         <div className="w-full">
             <section className="py-4 md:py-4 bg-white">
@@ -770,8 +950,11 @@ const HomePage = () => {
                                 <div className="px-8 pb-8">
                                     <div className="flex flex-col md:flex-row gap-8 items-start -mt-16">
                                         {/* Avatar Section */}
-                                        <div className="flex-shrink-0 mx-auto md:mx-0 relative group">
-                                            <div className="w-36 h-36 rounded-full p-1 bg-white shadow-2xl ring-4 ring-white group-hover:scale-105 transition-transform duration-300">
+                                        <div 
+                                            className="flex-shrink-0 mx-auto md:mx-0 relative group cursor-pointer"
+                                            onClick={handlePhotoClick}
+                                        >
+                                            <div className={`w-36 h-36 rounded-full p-1 bg-white shadow-2xl ring-4 ring-white group-hover:scale-105 transition-transform duration-300 relative ${isUploadingPhoto ? 'opacity-70' : ''}`}>
                                                 <img
                                                     src={
                                                         userDetails?.candidatePhoto
@@ -788,8 +971,34 @@ const HomePage = () => {
                                                             : "/user.png";
                                                     }}
                                                 />
+                                                {localStorage.getItem("role")?.toLowerCase().includes("admin") && (
+                                                    <div className="absolute inset-1 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full">
+                                                        <span className="text-white text-sm font-bold text-center px-2 flex flex-col items-center">
+                                                            {isUploadingPhoto ? (
+                                                                <>
+                                                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mb-1"></div>
+                                                                    Uploading...
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <Upload size={20} className="mb-1" />
+                                                                    Change Photo
+                                                                </>
+                                                            )}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
-                                            <div className="absolute bottom-3 right-3 w-5 h-5 border-4 border-white rounded-full shadow-md bg-green-500"></div>
+                                            <div className="absolute bottom-3 right-3 w-5 h-5 border-4 border-white rounded-full shadow-md bg-green-500 z-10"></div>
+                                            
+                                            {/* Hidden File Input */}
+                                            <input 
+                                                type="file" 
+                                                ref={fileInputRef} 
+                                                onChange={handlePhotoFileChange} 
+                                                accept="image/*" 
+                                                className="hidden" 
+                                            />
                                         </div>
 
                                         {/* Info Section */}

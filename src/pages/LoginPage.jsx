@@ -15,6 +15,8 @@ const LoginPage = () => {
   });
 
   const [toast, setToast] = useState({ show: false, message: "", type: "" });
+  const [isInactiveBlocked, setIsInactiveBlocked] = useState(false);
+  const [blockedUserName, setBlockedUserName] = useState("");
   const [typedText, setTypedText] = useState("");
   const [isTyping, setIsTyping] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
@@ -94,7 +96,14 @@ const LoginPage = () => {
           navigate("/home/users", { replace: true });
         }, 1000);
       } else {
-        showToast(result.error || "Invalid credentials", "error");
+        // Check specifically for inactive error
+        const errMsg = result.error || "Invalid credentials";
+        if (errMsg.toLowerCase().includes('inactive') || errMsg.toLowerCase().includes('account inactive')) {
+          setBlockedUserName(formData.username);
+          setIsInactiveBlocked(true);
+        } else {
+          showToast(errMsg, "error");
+        }
       }
     } catch (err) {
       console.error("Login Error:", err);
@@ -115,6 +124,56 @@ const LoginPage = () => {
       setToast({ show: false, message: "", type: "" });
     }, 5000);
   };
+
+  // ─── INACTIVE BLOCKED SCREEN ───────────────────────────────────
+  if (isInactiveBlocked) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-red-50 via-white to-orange-50 p-4">
+        <div className="w-full max-w-md">
+          <div className="bg-white rounded-3xl shadow-2xl border-2 border-red-200 overflow-hidden">
+            {/* Red Top Banner */}
+            <div className="bg-gradient-to-r from-red-500 to-rose-600 p-8 text-center">
+              <div className="w-20 h-20 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </div>
+              <h2 className="text-2xl font-extrabold text-white mb-1">Account Inactive</h2>
+              <p className="text-red-100 text-sm">Access has been disabled</p>
+            </div>
+
+            {/* Body */}
+            <div className="p-8 text-center">
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-5 mb-6">
+                <p className="text-red-800 font-bold text-base mb-1">⛔ Login Blocked</p>
+                <p className="text-red-600 text-sm leading-relaxed">
+                  The account <span className="font-bold text-red-700">"{blockedUserName}"</span> has been
+                  marked as <span className="font-bold">Inactive</span> by the Administrator.
+                </p>
+              </div>
+
+              <p className="text-gray-500 text-sm mb-6">
+                If you believe this is a mistake, please contact your System Administrator to reactivate your account.
+              </p>
+
+              <button
+                onClick={() => { setIsInactiveBlocked(false); setFormData({ username: '', password: '' }); }}
+                className="w-full py-3 px-6 bg-gradient-to-r from-gray-700 to-gray-900 text-white font-bold rounded-xl hover:from-gray-800 hover:to-black transition shadow-lg"
+              >
+                ← Back to Login
+              </button>
+            </div>
+
+            {/* Footer */}
+            <div className="px-8 py-4 bg-gray-50 border-t border-gray-100 text-center">
+              <p className="text-xs text-gray-400">Contact your system administrator to reactivate your account</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
