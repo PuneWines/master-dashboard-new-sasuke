@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from "react"
 import { fetchUserDetailsApi, patchSystemAccessApi, updateUserDataApi } from "../redux/api/settingApi";
 import { fetchSystemsApi } from "../redux/api/systemsApi";
 import { fetchAttendanceSummaryApi } from "../redux/api/attendenceApi";
-import { Award, Target, ListTodo, Clock, CheckCircle2, Search, Filter, Download, ChevronDown, X, User, Activity, Timer, Upload } from "lucide-react";
+import { Award, Target, ListTodo, Clock, CheckCircle2, Search, Filter, Download, ChevronDown, X, User, Activity, Timer, Upload, Camera } from "lucide-react";
 import searchIcon from "../assets/search-icon-logo.png";
 import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../utils/envConfig';
+import toast from 'react-hot-toast';
 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyBPTmVksbejNrOPNZNHYajQWWLbzA34hshoAPYig99hcqkYuiKy-j5pavsuqeFKIXNFg/exec";
 
@@ -54,6 +55,11 @@ const HomePage = () => {
     const fileInputRef = useRef(null);
     const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
+    // Admin Avatar Upload State
+    const [adminPhotoUrl, setAdminPhotoUrl] = useState('');
+    const [uploadingPhoto, setUploadingPhoto] = useState(false);
+    const isAdmin = localStorage.getItem("role")?.toLowerCase().includes("admin");
+
     // Update employee filter when department changes
     useEffect(() => {
         // Filter employees based on selected department
@@ -63,7 +69,7 @@ const HomePage = () => {
             setAvailableTaskEmployees(employees);
         } else {
             // Show only employees from selected department
-            const deptEmployees = ["All", 
+            const deptEmployees = ["All",
                 ...new Set(
                     todaysTasks
                         .filter(t => t.department === taskDeptFilter)
@@ -74,7 +80,7 @@ const HomePage = () => {
         }
         // Reset employee filter to "All" when department changes
         setTaskEmployeeFilter("All");
-        
+
         console.log("Department changed to:", taskDeptFilter);
         console.log("Available employees:", todaysTasks
             .filter(t => taskDeptFilter === "All" || t.department === taskDeptFilter)
@@ -239,7 +245,7 @@ const HomePage = () => {
                         if (!c) continue;
 
                         const assignedTo = c[4]?.v || "Unassigned";
-                        
+
                         // Filter tasks: Admin sees all tasks, regular users see only their assigned tasks
                         if (!isAdmin && assignedTo.toLowerCase().trim() !== usernameLower) continue;
 
@@ -343,6 +349,218 @@ const HomePage = () => {
         return id.toString().replace(/[^0-9]/g, '').replace(/^0+/, '');
     };
 
+    // Admin Avatar Functions
+    const compressImage = (file) => {
+        return new Promise((resolve) => {
+            if (!file.type.startsWith('image/')) return resolve(file);
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 800;
+                    const MAX_HEIGHT = 800;
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+                    } else {
+                        if (height > MAX_HEIGHT) {
+                            width *= MAX_HEIGHT / height;
+                            height = MAX_HEIGHT;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    canvas.toBlob((blob) => {
+                        if (blob) {
+                            resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
+                        } else {
+                            resolve(file);
+                        }
+                    }, 'image/jpeg', 0.8);
+                };
+                img.onerror = () => resolve(file);
+            };
+            reader.onerror = () => resolve(file);
+        });
+    };
+
+    const uploadPhotoToDrive = async (file) => {
+        try {
+            let fileToProcess = file;
+            if (file.type.startsWith('image/')) {
+                fileToProcess = await compressImage(file);
+            }
+
+            const reader = new FileReader();
+            const base64Data = await new Promise((resolve, reject) => {
+                reader.onload = () => {
+                    // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
+                    const base64 = reader.result.split(',')[1];
+                    resolve(base64);
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(fileToProcess);
+            });
+
+            const params = new URLSearchParams();
+            params.append('action', 'uploadFile');
+            params.append('sheetName', 'MASTER');
+            params.append('base64Data', base64Data);
+            params.append('fileName', `admin_avatar_${Date.now()}.jpg`);
+            params.append('mimeType', 'image/jpeg');
+            params.append('folderId', '145FIQRxwN_omuW2XPHx-Bbk8kFOpzosd');
+
+            // Use MASTER LOGIN script (where uploadFile function exists)
+            const uploadUrl = SCRIPT_URLS.MASTER_LOGIN;
+            console.log('Uploading to:', uploadUrl);
+            console.log('File size:', fileToProcess.size, 'bytes');
+
+            const response = await fetch(uploadUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params,
+            });
+
+            const data = await response.json();
+            console.log('Upload response:', data);
+
+            if (!data.success) throw new Error(data.error || 'File upload failed');
+
+            let finalUrl = data.fileUrl;
+            if (finalUrl && typeof finalUrl === 'object') finalUrl = finalUrl.fileUrl || finalUrl;
+            else if (finalUrl && typeof finalUrl === 'string' && finalUrl.startsWith('{') && finalUrl.includes('fileUrl=')) {
+                const match = finalUrl.match(/fileUrl=([^,}]+)/);
+                if (match && match[1]) finalUrl = match[1].trim();
+            }
+
+            console.log('Final URL:', finalUrl);
+            return finalUrl || '';
+        } catch (error) {
+            console.error('Error uploading photo:', error);
+            throw error;
+        }
+    };
+
+    const updateMasterSheetPhoto = async (photoUrl) => {
+        try {
+            console.log('Updating sheet with URL:', photoUrl);
+
+            const params = new URLSearchParams();
+            params.append('sheetName', 'MASTER');
+            params.append('action', 'updateCell');
+            params.append('rowIndex', '2'); // Row 2 (1-indexed, assuming admin is in row 2)
+            params.append('columnIndex', '12'); // Column L (12th column, 1-indexed)
+            params.append('value', photoUrl);
+
+            console.log('Update params:', Object.fromEntries(params));
+
+            // Use MASTER LOGIN script (where updateCell function exists)
+            const updateUrl = SCRIPT_URLS.MASTER_LOGIN;
+            console.log('Updating sheet via:', updateUrl);
+
+            const response = await fetch(updateUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params,
+            });
+
+            const data = await response.json();
+            console.log('Update response:', data);
+
+            if (!data.success) throw new Error(data.error || 'Failed to update sheet');
+
+            return data;
+        } catch (error) {
+            console.error('Error updating sheet:', error);
+            throw error;
+        }
+    };
+
+    const handleAvatarUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        console.log('Selected file:', file.name, file.size, file.type);
+
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error('File size must be less than 5MB');
+            return;
+        }
+
+        if (!file.type.startsWith('image/')) {
+            toast.error('Please select an image file');
+            return;
+        }
+
+        setUploadingPhoto(true);
+        try {
+            console.log('Starting upload...');
+            // Upload to Google Drive
+            const photoUrl = await uploadPhotoToDrive(file);
+            console.log('Photo URL from upload:', photoUrl);
+
+            if (!photoUrl) {
+                throw new Error('No URL returned from upload');
+            }
+
+            // Update Master Sheet with photo URL
+            await updateMasterSheetPhoto(photoUrl);
+
+            // Update local state
+            setAdminPhotoUrl(photoUrl);
+
+            console.log('Upload complete!');
+            toast.success('Admin avatar updated successfully!');
+        } catch (error) {
+            console.error('Upload failed:', error);
+            toast.error(`Failed to upload avatar: ${error.message}`);
+        } finally {
+            setUploadingPhoto(false);
+        }
+    };
+
+    const fetchAdminPhoto = async () => {
+        try {
+            console.log('Fetching admin photo from MASTER sheet...');
+            // Use MASTER LOGIN script to fetch data
+            const response = await fetch(`${SCRIPT_URLS.MASTER_LOGIN}?sheet=MASTER&action=fetch`);
+            if (response.ok) {
+                const result = await response.json();
+                console.log('MASTER sheet data:', result);
+
+                if (result.success && result.data && result.data.length > 1) {
+                    // Row 2 (index 1), Column L (index 11 in 0-based array)
+                    const photoUrl = result.data[1][11];
+                    console.log('Photo URL from sheet (Column L):', photoUrl);
+
+                    if (photoUrl && photoUrl !== '-' && photoUrl !== '') {
+                        // Convert Google Drive link to direct display link
+                        const displayUrl = getDirectDriveLink(photoUrl);
+                        console.log('Display URL:', displayUrl);
+                        setAdminPhotoUrl(displayUrl);
+                    } else {
+                        console.log('No admin photo URL found in sheet');
+                    }
+                } else {
+                    console.log('No data found in MASTER sheet');
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching admin photo:', error);
+        }
+    };
+
     const fetchBiometricAttendance = async () => {
         setLoadingBiometric(true);
         try {
@@ -409,9 +627,9 @@ const HomePage = () => {
                         if (res.ok) {
                             const logs = await res.json();
                             if (Array.isArray(logs)) {
-                                logs.forEach(l => { 
+                                logs.forEach(l => {
                                     if (l.LogDate && l.EmployeeCode) {
-                                        allLogs.push({...l, deviceName: dev.name});
+                                        allLogs.push({ ...l, deviceName: dev.name });
                                     }
                                 });
                             }
@@ -425,9 +643,9 @@ const HomePage = () => {
                     if (res.ok) {
                         const logs = await res.json();
                         if (Array.isArray(logs)) {
-                            logs.forEach(l => { 
+                            logs.forEach(l => {
                                 if (l.LogDate && l.EmployeeCode) {
-                                    allLogs.push({...l, deviceName: selectedDevice.name});
+                                    allLogs.push({ ...l, deviceName: selectedDevice.name });
                                 }
                             });
                         }
@@ -642,11 +860,11 @@ const HomePage = () => {
                     const searchId = (cachedId || userObjId || storedEmpId).toString();
                     const nSearchId = normalizeId(searchId);
                     const searchName = (userData.Name || userData.name || userData.candidateName || userName || storedUsername || '').toString().toLowerCase().trim();
-                    
+
                     console.log('HomePage - Searching for user photo:');
                     console.log('  - Employee ID:', searchId, '(normalized:', nSearchId + ')');
                     console.log('  - User Name:', searchName);
-                    
+
                     const jRes = await fetch(`${SCRIPT_URLS.HR_JOINING}?sheet=JOINING&action=fetch`);
                     if (jRes.ok) {
                         const jData = await jRes.json();
@@ -655,9 +873,9 @@ const HomePage = () => {
                             if (raw.length >= 6) {
                                 const headers = raw[5];
                                 const dataRows = raw.slice(6);
-                                
+
                                 console.log('HomePage - JOINING sheet headers:', headers);
-                                
+
                                 const getIdx = (...aliases) => {
                                     for (const alias of aliases) {
                                         const idx = headers.findIndex(h => h?.toString().toLowerCase().trim() === alias.toLowerCase());
@@ -668,31 +886,31 @@ const HomePage = () => {
                                     }
                                     return -1;
                                 };
-                                
+
                                 const colMap = {
                                     joiningNo: getIdx('Joining No', 'Employee ID', 'Emp ID', 'EmpID'),
                                     candidateName: getIdx('Candidate Name', 'Name As Per Aadhar', 'Name', 'Employee Name', 'Full Name'),
                                     candidatePhoto: getIdx('Candidate Photo', 'Photo', 'Profile Photo', 'Image', 'Emp Photo', 'Employee Photo'),
                                 };
-                                
+
                                 console.log('HomePage - Column map:', colMap);
-                                
+
                                 // Fallback: If candidatePhoto column not found by name, use index 12 (Column M)
                                 if (colMap.candidatePhoto === -1) {
                                     console.warn('HomePage - Candidate Photo column not found by name, using index 12 (Column M) as fallback');
                                     colMap.candidatePhoto = 12;
                                 }
-                                
+
                                 // Find user row
                                 const userPhotoData = dataRows.find((row, index) => {
                                     const rowIdRaw = (colMap.joiningNo !== -1 ? row[colMap.joiningNo] : '') || '';
                                     const rowId = rowIdRaw.toString().trim();
                                     const rowName = (colMap.candidateName !== -1 ? row[colMap.candidateName] : '')?.toString().toLowerCase().trim() || '';
                                     const nRowEmpId = normalizeId(rowId);
-                                    
+
                                     const sameId = nSearchId && nRowEmpId === nSearchId;
                                     const sameName = searchName && (rowName === searchName || rowName.includes(searchName) || searchName.includes(rowName));
-                                    
+
                                     if (sameId || sameName) {
                                         console.log(`HomePage - Matched at row index ${index}:`, {
                                             rowId,
@@ -701,16 +919,16 @@ const HomePage = () => {
                                             searchedName: searchName
                                         });
                                     }
-                                    
+
                                     return sameId || sameName;
                                 });
-                                
+
                                 if (userPhotoData) {
                                     const rawPhotoUrl = (colMap.candidatePhoto !== -1 ? userPhotoData[colMap.candidatePhoto] : '') || '';
                                     console.log('HomePage - Photo extraction:');
                                     console.log('  - Column index used:', colMap.candidatePhoto);
                                     console.log('  - Raw URL from sheet:', rawPhotoUrl);
-                                    
+
                                     candidatePhoto = getDirectDriveLink(rawPhotoUrl);
                                     console.log('HomePage - Photo URL (converted):', candidatePhoto);
                                 } else {
@@ -721,7 +939,7 @@ const HomePage = () => {
                         }
                     }
                     } // Closing if (!candidatePhoto)
-                } catch (e) { 
+                } catch (e) {
                     console.error("HomePage - Could not fetch candidate photo from JOINING sheet:", e);
                 }
 
@@ -772,6 +990,13 @@ const HomePage = () => {
         };
 
         fetchEmployeeDetails();
+
+        // Fetch admin photo if admin
+        const role = localStorage.getItem("role") || "";
+        const isAdminUser = role.toLowerCase().includes("admin");
+        if (isAdminUser) {
+            fetchAdminPhoto();
+        }
     }, []);
 
     // Re-fetch biometric data when device changes (for Admin)
@@ -957,11 +1182,13 @@ const HomePage = () => {
                                             <div className={`w-36 h-36 rounded-full p-1 bg-white shadow-2xl ring-4 ring-white group-hover:scale-105 transition-transform duration-300 relative ${isUploadingPhoto ? 'opacity-70' : ''}`}>
                                                 <img
                                                     src={
-                                                        userDetails?.candidatePhoto
-                                                            ? userDetails.candidatePhoto
-                                                            : userDetails?.employee_id
-                                                                ? `/employees/${userDetails.employee_id}.jpg`
-                                                                : "/user.png"
+                                                        isAdmin && adminPhotoUrl
+                                                            ? adminPhotoUrl
+                                                            : userDetails?.candidatePhoto
+                                                                ? userDetails.candidatePhoto
+                                                                : userDetails?.employee_id
+                                                                    ? `/employees/${userDetails.employee_id}.jpg`
+                                                                    : "/user.png"
                                                     }
                                                     alt="Employee"
                                                     className="w-full h-full rounded-full object-cover"
@@ -971,7 +1198,7 @@ const HomePage = () => {
                                                             : "/user.png";
                                                     }}
                                                 />
-                                                {localStorage.getItem("role")?.toLowerCase().includes("admin") && (
+                                                {isAdmin && (
                                                     <div className="absolute inset-1 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full">
                                                         <span className="text-white text-sm font-bold text-center px-2 flex flex-col items-center">
                                                             {isUploadingPhoto ? (
@@ -989,7 +1216,7 @@ const HomePage = () => {
                                                     </div>
                                                 )}
                                             </div>
-                                            <div className="absolute bottom-3 right-3 w-5 h-5 border-4 border-white rounded-full shadow-md bg-green-500 z-10"></div>
+                                            <div className="absolute bottom-3 right-3 w-5 h-5 border-4 border-white rounded-full shadow-md bg-green-500 z-10" style={{ bottom: '3rem', right: '3rem' }}></div>
                                             
                                             {/* Hidden File Input */}
                                             <input 
@@ -1067,7 +1294,7 @@ const HomePage = () => {
                                     <div className="flex items-center gap-3">
                                         <h3 className="text-xl font-bold text-gray-800">Today's Tasks</h3>
                                         <span className="text-xs font-bold bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full border border-blue-200">
-                                            {todaysTasks.filter(t => 
+                                            {todaysTasks.filter(t =>
                                                 (taskDeptFilter === "All" || t.department === taskDeptFilter) &&
                                                 (taskEmployeeFilter === "All" || t.assignedTo?.toLowerCase().trim() === taskEmployeeFilter?.toLowerCase().trim())
                                             ).length}
@@ -1101,13 +1328,13 @@ const HomePage = () => {
                                             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
                                             <p className="text-gray-500 text-sm animate-pulse">Fetching your tasks...</p>
                                         </div>
-                                    ) : todaysTasks.filter(t => 
+                                    ) : todaysTasks.filter(t =>
                                         (taskDeptFilter === "All" || t.department === taskDeptFilter) &&
                                         (taskEmployeeFilter === "All" || t.assignedTo?.toLowerCase().trim() === taskEmployeeFilter?.toLowerCase().trim())
                                     ).length > 0 ? (
                                         <div className="space-y-3 w-full">
                                             {todaysTasks
-                                                .filter(t => 
+                                                .filter(t =>
                                                     (taskDeptFilter === "All" || t.department === taskDeptFilter) &&
                                                     (taskEmployeeFilter === "All" || t.assignedTo?.toLowerCase().trim() === taskEmployeeFilter?.toLowerCase().trim())
                                                 )
@@ -1129,7 +1356,7 @@ const HomePage = () => {
                                                             </div>
                                                         </div>
                                                         <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${task.status === 'completed' ? 'bg-green-100 text-green-600' :
-                                                                task.status === 'overdue' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
+                                                            task.status === 'overdue' ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-600'
                                                             }`}>
                                                             {task.status.toUpperCase()}
                                                         </span>
@@ -1160,8 +1387,8 @@ const HomePage = () => {
                                             Attendance Health
                                         </h3>
                                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
-                                            {search 
-                                                ? `Viewing: ${biometricAttendance.find(d => d.employeeName.toLowerCase().includes(search.toLowerCase()) || d.employeeCode.toString().includes(search))?.employeeName || 'No Match'}` 
+                                            {search
+                                                ? `Viewing: ${biometricAttendance.find(d => d.employeeName.toLowerCase().includes(search.toLowerCase()) || d.employeeCode.toString().includes(search))?.employeeName || 'No Match'}`
                                                 : `Showing: ${biometricStats?.employeeName || 'My Records'}`}
                                         </p>
                                     </div>
@@ -1179,7 +1406,7 @@ const HomePage = () => {
                                     </div>
                                 ) : (search ? (biometricAttendance.find(d => d.employeeName.toLowerCase().includes(search.toLowerCase()) || d.employeeCode.toString().includes(search))) : biometricStats) ? (
                                     (() => {
-                                        const stats = search 
+                                        const stats = search
                                             ? biometricAttendance.find(d => d.employeeName.toLowerCase().includes(search.toLowerCase()) || d.employeeCode.toString().includes(search))
                                             : biometricStats;
                                         return (
@@ -1252,15 +1479,15 @@ const HomePage = () => {
                                 ) : (
                                     <div className="flex flex-col items-center justify-center py-10 text-center gap-4">
                                         <div className="w-20 h-20 bg-gray-50 rounded-full flex items-center justify-center border-2 border-dashed border-gray-200">
-                                          <Activity size={32} className="text-gray-300" />
+                                            <Activity size={32} className="text-gray-300" />
                                         </div>
                                         <div>
-                                          <p className="font-black text-gray-400 text-sm uppercase tracking-widest">No Logs Found</p>
-                                          <p className="text-xs text-gray-400 mt-1 font-medium">We couldn't find your biometric records for this month.</p>
+                                            <p className="font-black text-gray-400 text-sm uppercase tracking-widest">No Logs Found</p>
+                                            <p className="text-xs text-gray-400 mt-1 font-medium">We couldn't find your biometric records for this month.</p>
                                         </div>
                                         {localStorage.getItem("role")?.toLowerCase().includes("admin") && biometricAttendance.length > 0 && (
                                             <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest bg-blue-50 px-4 py-2 rounded-xl border border-blue-100 mt-2">
-                                               {biometricAttendance.length} records found for other employees
+                                                {biometricAttendance.length} records found for other employees
                                             </p>
                                         )}
                                     </div>
@@ -1323,26 +1550,26 @@ const HomePage = () => {
                                                 </tr>
                                             ) : biometricAttendance.length > 0 ? (
                                                 biometricAttendance
-                                                    .filter(item => !search || 
-                                                        item.employeeName?.toLowerCase().includes(search.toLowerCase()) || 
+                                                    .filter(item => !search ||
+                                                        item.employeeName?.toLowerCase().includes(search.toLowerCase()) ||
                                                         item.employeeCode?.toString().includes(search)
                                                     )
                                                     .map((item, idx) => (
                                                         <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
-                                                        <td className="px-6 py-4">
-                                                            <div className="flex flex-col">
-                                                                <span className="text-sm font-black text-gray-800">{item.employeeName}</span>
-                                                                <span className="text-[10px] font-bold text-blue-500">{item.employeeCode}</span>
-                                                            </div>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-center text-sm font-black text-green-600 bg-green-50/30">{item.presentDays}</td>
-                                                        <td className="px-6 py-4 text-center text-sm font-black text-rose-600 bg-rose-50/30">{item.absentDays}</td>
-                                                        <td className="px-6 py-4 text-center text-sm font-bold text-orange-500">{item.lateDays}</td>
-                                                        <td className="px-6 py-4 text-center text-sm font-bold text-red-500">{item.punchMiss}</td>
-                                                        <td className="px-6 py-4 text-center text-sm font-black text-slate-700">{item.totalWorkHours}</td>
-                                                        <td className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{item.storeName}</td>
-                                                    </tr>
-                                                ))
+                                                            <td className="px-6 py-4">
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-sm font-black text-gray-800">{item.employeeName}</span>
+                                                                    <span className="text-[10px] font-bold text-blue-500">{item.employeeCode}</span>
+                                                                </div>
+                                                            </td>
+                                                            <td className="px-6 py-4 text-center text-sm font-black text-green-600 bg-green-50/30">{item.presentDays}</td>
+                                                            <td className="px-6 py-4 text-center text-sm font-black text-rose-600 bg-rose-50/30">{item.absentDays}</td>
+                                                            <td className="px-6 py-4 text-center text-sm font-bold text-orange-500">{item.lateDays}</td>
+                                                            <td className="px-6 py-4 text-center text-sm font-bold text-red-500">{item.punchMiss}</td>
+                                                            <td className="px-6 py-4 text-center text-sm font-black text-slate-700">{item.totalWorkHours}</td>
+                                                            <td className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">{item.storeName}</td>
+                                                        </tr>
+                                                    ))
                                             ) : (
                                                 <tr>
                                                     <td colSpan="7" className="px-6 py-20 text-center">

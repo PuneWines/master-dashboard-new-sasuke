@@ -66,16 +66,16 @@ export const fetchUserDetailsApi = async () => {
             console.log("[settingApi] ✅ Live data loaded:", result.data.length, "users");
             // Data from new script already has correct keys — return as-is
             return result.data.map(user => ({
-                id:                 user.id || Math.random(),
-                employee_id:        user.employee_id        || "",
-                user_name:          user.user_name          || "Unknown",
-                designation:        user.designation        || "",
-                user_id:            user.user_id            || "",
-                password:           user.password           || "",
-                role:               user.role               || "Employee",
-                email_id:           user.email_id           || "",
-                number:             user.number             || "",
-                shops_name:         user.shops_name         || "",
+                id: user.id || Math.random(),
+                employee_id: user.employee_id || "",
+                user_name: user.user_name || "Unknown",
+                designation: user.designation || "",
+                user_id: user.user_id || "",
+                password: user.password || "",
+                role: user.role || "Employee",
+                email_id: user.email_id || "",
+                number: user.number || "",
+                shops_name: user.shops_name || "",
                 master_page_access: Array.isArray(user.master_page_access) ? user.master_page_access : [],
                 tab_system_access:  (user.tab_system_access && typeof user.tab_system_access === 'object')
                                         ? user.tab_system_access
@@ -103,12 +103,12 @@ export const createUserApi = async (formData) => {
         const payload = JSON.stringify({
             action: 'createUser',
             data: {
-                employee_id:        formData.employee_id  || "",
-                user_name:          formData.user_name    || "",
-                designation:        formData.designation  || "",
-                user_id:            formData.user_id      || "",
-                password:           formData.password     || "",
-                role:               formData.role         || "Employee",
+                employee_id: formData.employee_id || "",
+                user_name: formData.user_name || "",
+                designation: formData.designation || "",
+                user_id: formData.user_id || "",
+                password: formData.password || "",
+                role: formData.role || "Employee",
                 master_page_access: Array.isArray(formData.master_page_access)
                                         ? formData.master_page_access
                                         : [],
@@ -165,7 +165,7 @@ export const createUserApi = async (formData) => {
 export const deleteUserByIdApi = async (id) => {
     try {
         console.log("[settingApi] Deleting user ID:", id);
-        
+
         const payload = JSON.stringify({
             action: 'deleteUser',
             id: id
@@ -204,12 +204,12 @@ export const updateUserDataApi = async ({ id, updatedUser }) => {
             action: 'updateUser',
             id: id,
             data: {
-                employee_id:        updatedUser.employee_id  || "",
-                user_name:          updatedUser.user_name    || "",
-                designation:        updatedUser.designation  || "",
-                user_id:            updatedUser.user_id      || "",
-                password:           updatedUser.password     || "",
-                role:               updatedUser.role         || "Employee",
+                employee_id: updatedUser.employee_id || "",
+                user_name: updatedUser.user_name || "",
+                designation: updatedUser.designation || "",
+                user_id: updatedUser.user_id || "",
+                password: updatedUser.password || "",
+                role: updatedUser.role || "Employee",
                 master_page_access: Array.isArray(updatedUser.master_page_access)
                                         ? updatedUser.master_page_access
                                         : [],
