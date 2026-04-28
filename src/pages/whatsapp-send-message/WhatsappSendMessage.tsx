@@ -41,66 +41,74 @@ interface HistoryRow {
     fileLink: string;
 }
 
-// ─── JSONP helper: calls GAS doGet with ?callback=xxx to get JSON back ────────
-function callGAS(params: Record<string, string>): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const cbName = 'gas_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-        const timer = setTimeout(() => { cleanup(); reject(new Error('GAS request timed out (15s). Check deployment.')); }, 15000);
+// ─── Unified GAS Request Helper (Fetch via Proxy) ────────────────────────────
+async function requestGAS(params: Record<string, any>, method: 'GET' | 'POST' = 'GET'): Promise<any> {
+    if (!GAS_URL) {
+        throw new Error('VITE_WHATSAPP_API_URL is not configured in .env file.');
+    }
 
-        function cleanup() {
-            clearTimeout(timer);
-            delete (window as any)[cbName];
-            document.getElementById(cbName)?.remove();
-        }
-
-        (window as any)[cbName] = (data: any) => { cleanup(); resolve(data); };
-
-        const qs = Object.entries({ ...params, callback: cbName })
-            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-
-        if (!GAS_URL) {
-            cleanup();
-            reject(new Error('VITE_WHATSAPP_API_URL is not configured in .env file.'));
-            return;
-        }
-
-        const script = document.createElement('script');
-        script.id = cbName;
-        script.src = `${GAS_URL}?${qs}`;
-        script.onerror = () => { cleanup(); reject(new Error('Network error. Check GAS URL and ensure it starts with https:// or is a valid proxied path.')); };
-        document.head.appendChild(script);
-    });
-}
-
-// ─── POST to GAS (save to User sheet) ────────────────────────────────────────
-async function postToGAS(payload: Record<string, any>): Promise<any> {
     try {
-        const res = await fetch(GAS_URL, {
-            method: 'POST',
+        let url = GAS_URL;
+        let options: RequestInit = {
+            method,
             headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify(payload),
-            redirect: 'follow',
-        });
-        const text = await res.text();
+            redirect: 'follow'
+        };
+
+        if (method === 'GET') {
+            const qs = Object.entries(params)
+                .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+                .join('&');
+            url += (url.includes('?') ? '&' : '?') + qs;
+        } else {
+            options.body = JSON.stringify(params);
+        }
+
+        const response = await fetch(url, options);
+        if (!response.ok) {
+            throw new Error(`HTTP Error: ${response.status}`);
+        }
+
+        let text = await response.text();
+        
+        // Strip JSONP wrapper if present (e.g. callback([...]))
+        // This handles cases where GAS returns a callback string instead of pure JSON
+        const trimmed = text.trim();
+        if (trimmed.match(/^[a-zA-Z0-9_]+\(/) && (trimmed.endsWith(')') || trimmed.endsWith(');'))) {
+            text = trimmed.replace(/^[a-zA-Z0-9_]+\(/, '').replace(/\);?$/, '');
+        }
+
+        // Diagnose HTML responses (wrong ID / access restricted)
+        if (text.trimStart().startsWith("<!DOCTYPE") || text.trimStart().startsWith("<html")) {
+            console.error("[WhatsappSendMessage] ❌ GAS returned HTML — deployment or proxy issue.");
+            throw new Error("Invalid response from server (HTML). Check GAS deployment.");
+        }
+
         return JSON.parse(text);
-    } catch {
-        return { success: true }; // non-critical — sheet save failure shouldn't block send
+    } catch (err: any) {
+        console.error("[WhatsappSendMessage] GAS Request failed:", err);
+        throw err;
     }
 }
 
 // ─── Fetch history from User sheet via GAS (action=getHistory) – reads A:G ────
 async function fetchHistoryFromGAS(): Promise<HistoryRow[]> {
-    const data = await callGAS({ action: 'getHistory', sheetId: USER_SHEET_ID });
-    if (!Array.isArray(data)) return [];
-    return data.map((row: any[]) => ({
-        timestamp: row[0] ?? '',
-        shopName: row[1] ?? '',
-        message: row[2] ?? '',
-        names: row[3] ?? '',
-        numbers: row[4] ?? '',
-        status: row[5] ?? '',
-        fileLink: row[6] ?? '',
-    }));
+    try {
+        const data = await requestGAS({ action: 'getHistory', sheetId: USER_SHEET_ID });
+        if (!Array.isArray(data)) return [];
+        return data.map((row: any[]) => ({
+            timestamp: row[0] ?? '',
+            shopName: row[1] ?? '',
+            message: row[2] ?? '',
+            names: row[3] ?? '',
+            numbers: row[4] ?? '',
+            status: row[5] ?? '',
+            fileLink: row[6] ?? '',
+        }));
+    } catch (err) {
+        console.error("History fetch failed:", err);
+        return [];
+    }
 }
 
 // ─── Send WhatsApp message via Maytapi directly ───────────────────────────────
@@ -183,7 +191,7 @@ const WhatsappSendMessage: React.FC = () => {
         setIsLoadingShops(true);
         setStatus({ message: '', type: '' });
         try {
-            const data = await callGAS({ action: 'getShopNames' });
+            const data = await requestGAS({ action: 'getShopNames' });
             setShopNames(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load shops: ${err.message}`, type: 'error' });
@@ -221,7 +229,7 @@ const WhatsappSendMessage: React.FC = () => {
 
         setIsLoadingContacts(true);
         try {
-            const data = await callGAS({ action: 'getContactsByShop', shopName: shop });
+            const data = await requestGAS({ action: 'getContactsByShop', shopName: shop });
             setContacts(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load contacts: ${err.message}`, type: 'error' });
@@ -287,14 +295,14 @@ const WhatsappSendMessage: React.FC = () => {
 
         setStatus({ message: filePayload ? '⏳ Uploading file to Drive & saving record...' : '⏳ Saving record to Sheet...', type: 'loading' });
 
-        const gasRes = await postToGAS({
+        const gasRes = await requestGAS({
             action: 'submitFormData',
             message: messageBody,
             shopName: selectedShop,
             names: namesStr,
             numbers: numbersStr,
             file: filePayload ? { name: rawFile!.name, type: rawFile!.type, data: filePayload.base64 } : null,
-        });
+        }, 'POST');
 
         const driveLink = gasRes?.fileUrl || '';
 
@@ -361,7 +369,7 @@ const WhatsappSendMessage: React.FC = () => {
         }
         setIsSubmitting(true);
         try {
-            await postToGAS({ action: 'addNewContact', shopName: shop, name: name.trim(), number: number.trim() });
+            await requestGAS({ action: 'addNewContact', shopName: shop, name: name.trim(), number: number.trim() }, 'POST');
             setStatus({ message: '✅ Contact Added!', type: 'success' });
             setIsModalOpen(false);
             setNewContact({ shopName: '', name: '', number: '', isNewShop: false, newShopName: '' });
@@ -409,8 +417,8 @@ const WhatsappSendMessage: React.FC = () => {
                         id="btn-toggle-history"
                         onClick={handleToggleHistory}
                         className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm shadow transition-all active:scale-95 ${showHistory
-                                ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                : 'bg-green-500 text-white hover:bg-green-600 shadow-green-200 shadow-md'
+                            ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            : 'bg-green-500 text-white hover:bg-green-600 shadow-green-200 shadow-md'
                             }`}
                     >
                         {showHistory ? (
@@ -520,10 +528,10 @@ const WhatsappSendMessage: React.FC = () => {
                                                         <td className="p-3 whitespace-nowrap">
                                                             {row.status ? (
                                                                 <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${row.status.toLowerCase().includes('sent')
-                                                                        ? 'bg-green-100 text-green-700'
-                                                                        : row.status.toLowerCase().includes('fail')
-                                                                            ? 'bg-red-100 text-red-600'
-                                                                            : 'bg-gray-100 text-gray-600'
+                                                                    ? 'bg-green-100 text-green-700'
+                                                                    : row.status.toLowerCase().includes('fail')
+                                                                        ? 'bg-red-100 text-red-600'
+                                                                        : 'bg-gray-100 text-gray-600'
                                                                     }`}>
                                                                     {row.status}
                                                                 </span>
@@ -675,8 +683,8 @@ const WhatsappSendMessage: React.FC = () => {
                 {/* Status bar */}
                 {status.message && (
                     <div className={`mt-6 text-center font-bold p-3 rounded-lg ${status.type === 'success' ? 'bg-green-100 text-green-700' :
-                            status.type === 'error' ? 'bg-red-100   text-red-700' :
-                                'bg-blue-100  text-blue-700'}`}>
+                        status.type === 'error' ? 'bg-red-100   text-red-700' :
+                            'bg-blue-100  text-blue-700'}`}>
                         {status.message}
                     </div>
                 )}

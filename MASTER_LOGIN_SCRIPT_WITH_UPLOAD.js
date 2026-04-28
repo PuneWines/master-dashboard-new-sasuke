@@ -1,74 +1,117 @@
 /**
  * ============================================================
- *   MASTER LOGIN SYSTEM — Complete Apps Script
- *   Sheet: "Master Login"
- *   PLUS: File Upload & Cell Update functionality
+ *   MASTER LOGIN & WHATSAPP SYSTEM — Complete Apps Script
+ *   Sheet: "Master Login", "SHOPS", "CONTACTS", "WHATSAPP_HISTORY"
+ *   Features: Login, User Management, File Upload, WhatsApp API
  * ============================================================
  */
 
-// Use var to prevent "Identifier has already been declared" global scope errors in GAS
+// Global Configuration
 var SHEET_ID = '1bxOa_4GcLPLVsUMNtWm2sL9bO04ThG8P_NsB1TYU3ho';
 var LOGIN_TAB_NAME = 'Master Login';
+var MASTER_SHEET_NAME = 'MASTER'; // For Shops fallback
+var SHOPS_SHEET_NAME = 'SHOPS';
+var CONTACTS_SHEET_NAME = 'CONTACTS';
+var HISTORY_SHEET_NAME = 'WHATSAPP_HISTORY';
 
-// MASTER sheet is in the SAME spreadsheet
-var MASTER_SHEET_NAME = 'MASTER';
-
+// Column mapping for "Master Login" sheet
 var COL = {
   EMPLOYEE_ID: 0,   // A
-  USER_NAME: 1,   // B
+  USER_NAME: 1,     // B
   DESIGNATION: 2,   // C
-  USER_ID: 3,   // D
-  PASS: 4,   // E
-  ROLE: 5,   // F
-  MASTER_PAGE_ACCESS: 6,   // G
-  TAB_SYSTEM_ACCESS: 7,   // H
-  SHOPS_NAME: 8,   // I
-  GMAIL_ID: 9,   // J
-  NUMBER: 10   // K
+  USER_ID: 3,       // D
+  PASS: 4,          // E
+  ROLE: 5,          // F
+  MASTER_PAGE_ACCESS: 6, // G
+  TAB_SYSTEM_ACCESS: 7,  // H
+  SHOPS_NAME: 8,    // I
+  GMAIL_ID: 9,      // J
+  NUMBER: 10,       // K
+  PHOTO: 11         // L
 };
 
-var TOTAL_COLS = 11;
+var TOTAL_COLS = 12;
 
-// Google Drive folder for admin avatars
+// Google Drive folders
 var ADMIN_AVATAR_FOLDER_ID = '145FIQRxwN_omuW2XPHx-Bbk8kFOpzosd';
+var WHATSAPP_FILES_FOLDER_ID = '13hi-xRLOEksb7GH9CthczzlNJTWuD4X3'; // Change if needed
 
-// Helper to safely output JSON and force CORS headers natively in Apps Script
-function createResponse(data) {
-  return ContentService
-    .createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
+/**
+ * Helper to safely output JSON/JSONP and force CORS headers
+ */
+function createResponse(data, e) {
+  var callback = e && e.parameter ? e.parameter.callback : null;
+  var json = JSON.stringify(data);
+  
+  if (callback) {
+    // Return JSONP for frontend callGAS (script tag injection)
+    return ContentService
+      .createTextOutput(callback + "(" + json + ")")
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  } else {
+    // Return standard JSON
+    return ContentService
+      .createTextOutput(json)
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
+/**
+ * Handle GET Requests (Fetch data, Login, WhatsApp Shops/History)
+ */
 function doGet(e) {
   try {
     var params = e.parameter || {};
     var action = (params.action || '').trim();
 
-    // Handle fetch action for any sheet
-    if (action === 'fetch') {
-      var sheetName = params.sheet || 'Master Login';
-      return fetchSheetData(sheetName);
+    // 1. WhatsApp: Get Shop Names
+    if (action === 'getShopNames') {
+      return createResponse(getShopNames(), e);
     }
 
-    if (action === 'fetchUsers') return fetchAllUsers();
-    if (params.username && params.password) return processLogin(String(params.username).trim(), String(params.password).trim());
+    // 2. WhatsApp: Get Contacts by Shop
+    if (action === 'getContactsByShop') {
+      return createResponse(getContactsByShop(params.shopName), e);
+    }
 
-    return createResponse({ success: false, error: 'No valid action provided.' });
+    // 3. WhatsApp: Get History
+    if (action === 'getHistory') {
+      return createResponse(getHistory(), e);
+    }
+
+    // 4. User System: Fetch Sheet Data
+    if (action === 'fetch') {
+      var sheetName = params.sheet || LOGIN_TAB_NAME;
+      var data = fetchSheetDataInternal(sheetName);
+      return createResponse(data, e);
+    }
+
+    // 5. User System: Fetch All Users
+    if (action === 'fetchUsers') {
+      return createResponse(fetchAllUsersInternal(), e);
+    }
+
+    // 6. User System: Login
+    if (params.username && params.password) {
+      return createResponse(processLoginInternal(params.username, params.password), e);
+    }
+
+    return createResponse({ success: false, error: 'No valid action provided.' }, e);
   } catch (err) {
-    return createResponse({ success: false, error: 'doGet error: ' + err.toString() });
+    return createResponse({ success: false, error: 'doGet error: ' + err.toString() }, e);
   }
 }
 
+/**
+ * Handle POST Requests (Create/Update Users, Upload Files, Save WhatsApp Record)
+ */
 function doPost(e) {
   try {
     var payload = {};
-
-    // Try to parse JSON first
     if (e.postData && e.postData.contents) {
       try {
         payload = JSON.parse(e.postData.contents);
       } catch (_) {
-        // If JSON parsing fails, check if it's form data
         payload = {};
       }
     }
@@ -76,274 +119,225 @@ function doPost(e) {
     // If payload is empty, try e.parameter (form data)
     if (Object.keys(payload).length === 0 && e.parameter) {
       payload = e.parameter;
-      if (payload.data) {
+      if (payload.data && typeof payload.data === 'string') {
         try { payload.data = JSON.parse(payload.data); } catch (_) { }
+      }
+      if (payload.rowData && typeof payload.rowData === 'string') {
+        try { payload.rowData = JSON.parse(payload.rowData); } catch (_) { }
       }
     }
 
-    Logger.log('doPost payload action: ' + (payload.action || 'none'));
-    Logger.log('doPost payload keys: ' + Object.keys(payload).join(', '));
+    var action = payload.action || '';
 
-    // Handle new actions for Admin Avatar Upload
-    if (payload.action === 'uploadFile') return uploadFileToDrive(payload);
-    if (payload.action === 'updateCell') return updateCellInSheet(payload);
+    // WhatsApp Actions
+    if (action === 'submitFormData') return createResponse(submitFormDataInternal(payload), e);
+    if (action === 'addNewContact') return createResponse(addNewContactInternal(payload), e);
 
-    if (payload.action === 'createUser') return createUser(payload.data || {});
-    if (payload.action === 'updateUser') return updateUser(payload.id, payload.data || {});
-    if (payload.action === 'deleteUser') return deleteUser(payload.id);
+    // User System Actions
+    if (action === 'uploadFile') return createResponse(uploadFileToDriveInternal(payload), e);
+    if (action === 'updateCell') return createResponse(updateCellInSheetInternal(payload), e);
+    if (action === 'createUser') return createResponse(createUserInternal(payload.data || {}), e);
+    if (action === 'updateUser') return createResponse(updateUserInternal(payload.id, payload.data || {}), e);
+    if (action === 'deleteUser') return createResponse(deleteUserInternal(payload.id), e);
 
-    if (payload.username !== undefined || payload.password !== undefined) {
-      return processLogin(String(payload.username || '').trim(), String(payload.password || '').trim());
+    // Login Fallback
+    if (payload.username !== undefined && payload.password !== undefined) {
+      return createResponse(processLoginInternal(payload.username, payload.password), e);
     }
 
-    return createResponse({ success: false, error: 'No valid action in POST. Action: ' + (payload.action || 'undefined') });
+    return createResponse({ success: false, error: 'No valid action in POST. Action: ' + action }, e);
   } catch (err) {
-    return createResponse({ success: false, error: 'doPost error: ' + err.toString() });
+    return createResponse({ success: false, error: 'doPost error: ' + err.toString() }, e);
   }
 }
 
-/**
- * ============================================================
- *   NEW: Fetch Sheet Data (for any sheet)
- * ============================================================
- */
-function fetchSheetData(sheetName) {
-  try {
-    var ss = SpreadsheetApp.openById(SHEET_ID);
-    var sheet = ss.getSheetByName(sheetName);
+// ──────────────────────────────────────────────────────────────────────────────
+// WHATSAPP LOGIC
+// ──────────────────────────────────────────────────────────────────────────────
 
-    if (!sheet) {
-      return createResponse({ success: false, error: 'Sheet not found: ' + sheetName });
+function getShopNames() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(SHOPS_SHEET_NAME) || ss.getSheetByName(MASTER_SHEET_NAME);
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+  var data = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var shops = data.map(function(r) { return String(r[0]).trim(); }).filter(Boolean);
+  return shops.filter(function(v, i, a) { return a.indexOf(v) === i; }).sort();
+}
+
+function getContactsByShop(shopName) {
+  if (!shopName) return [];
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(CONTACTS_SHEET_NAME);
+  if (!sheet) return [];
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  
+  var contacts = [];
+  for (var i = 1; i < data.length; i++) {
+    // Assuming: A=ShopName, B=Name, C=Number
+    if (String(data[i][0]).trim() === String(shopName).trim()) {
+      contacts.push([i, data[i][1], data[i][2]]); 
     }
+  }
+  return contacts;
+}
 
-    var data = sheet.getDataRange().getValues();
+function getHistory() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
+  if (!sheet) return [];
+  var data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+  return data.slice(1); // Return everything except header
+}
 
-    return createResponse({
-      success: true,
-      data: data,
-      sheetName: sheetName,
-      message: 'Data fetched successfully'
+function addNewContactInternal(payload) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(CONTACTS_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(CONTACTS_SHEET_NAME);
+    sheet.appendRow(['Shop Name', 'Contact Name', 'Number']);
+  }
+  sheet.appendRow([payload.shopName, payload.name, payload.number]);
+  return { success: true, message: 'Contact added' };
+}
+
+function submitFormDataInternal(payload) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(HISTORY_SHEET_NAME);
+    sheet.appendRow(['Timestamp', 'Shop Name', 'Message', 'Names', 'Numbers', 'Status', 'File Link']);
+  }
+
+  var fileUrl = '';
+  if (payload.file && payload.file.data) {
+    var uploadRes = uploadFileToDriveInternal({
+      base64Data: payload.file.data,
+      fileName: payload.file.name,
+      mimeType: payload.file.type,
+      folderId: WHATSAPP_FILES_FOLDER_ID
     });
-
-  } catch (err) {
-    Logger.log('Fetch sheet error: ' + err.toString());
-    return createResponse({ success: false, error: 'Fetch failed: ' + err.toString() });
+    if (uploadRes.success) fileUrl = uploadRes.fileUrl;
   }
+
+  var timestamp = Utilities.formatDate(new Date(), "GMT+5:30", "yyyy-MM-dd HH:mm:ss");
+  sheet.appendRow([
+    timestamp,
+    payload.shopName || '',
+    payload.message || '',
+    payload.names || '',
+    payload.numbers || '',
+    'Sent', // Default status
+    fileUrl
+  ]);
+
+  return { success: true, fileUrl: fileUrl, message: 'Record saved' };
 }
 
-/**
- * ============================================================
- *   NEW: Upload File to Google Drive
- * ============================================================
- */
-function uploadFileToDrive(payload) {
-  try {
-    var base64Data = payload.base64Data;
-    var fileName = payload.fileName || 'uploaded_file';
-    var mimeType = payload.mimeType || 'image/jpeg';
-    var folderId = payload.folderId || ADMIN_AVATAR_FOLDER_ID;
+// ──────────────────────────────────────────────────────────────────────────────
+// USER SYSTEM LOGIC (INTERNAL HELPERS)
+// ──────────────────────────────────────────────────────────────────────────────
 
-    if (!base64Data) {
-      return createResponse({ success: false, error: 'No base64 data provided' });
-    }
-
-    // Decode base64 data
-    var decodedBytes = Utilities.base64Decode(base64Data);
-    var blob = Utilities.newBlob(decodedBytes, mimeType, fileName);
-
-    // Get folder and create file
-    var folder = DriveApp.getFolderById(folderId);
-    var file = folder.createFile(blob);
-
-    // Make file publicly accessible (anyone with link can view)
-    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-
-    var fileUrl = file.getUrl();
-    var fileId = file.getId();
-
-    return createResponse({
-      success: true,
-      fileUrl: fileUrl,
-      fileId: fileId,
-      fileName: fileName,
-      message: 'File uploaded successfully'
-    });
-
-  } catch (err) {
-    Logger.log('Upload error: ' + err.toString());
-    return createResponse({ success: false, error: 'Upload failed: ' + err.toString() });
-  }
+function fetchSheetDataInternal(sheetName) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return { success: false, error: 'Sheet not found' };
+  return { success: true, data: sheet.getDataRange().getValues() };
 }
 
-/**
- * ============================================================
- *   NEW: Update Cell in Sheet
- * ============================================================
- */
-function updateCellInSheet(payload) {
-  try {
-    var sheetName = payload.sheetName;
-    var rowIndex = parseInt(payload.rowIndex);
-    var columnIndex = parseInt(payload.columnIndex);
-    var value = payload.value;
-
-    if (!sheetName || !rowIndex || !columnIndex) {
-      return createResponse({
-        success: false,
-        error: 'Missing required parameters: sheetName, rowIndex, columnIndex'
-      });
-    }
-
-    // Open the spreadsheet (MASTER sheet is in the same spreadsheet)
-    var ss = SpreadsheetApp.openById(SHEET_ID);
-    var sheet = ss.getSheetByName(sheetName);
-
-    if (!sheet) {
-      return createResponse({ success: false, error: 'Sheet not found: ' + sheetName });
-    }
-
-    Logger.log('Updating cell: Row=' + rowIndex + ', Col=' + columnIndex + ', Value=' + value);
-
-    // Update the cell (rowIndex and columnIndex are 1-based)
-    var cell = sheet.getRange(rowIndex, columnIndex);
-    cell.setValue(value);
-
-    // Force flush to ensure the change is saved immediately
-    SpreadsheetApp.flush();
-
-    return createResponse({
-      success: true,
-      message: 'Cell updated successfully',
-      sheetName: sheetName,
-      rowIndex: rowIndex,
-      columnIndex: columnIndex,
-      value: value
-    });
-
-  } catch (err) {
-    Logger.log('Update cell error: ' + err.toString());
-    return createResponse({ success: false, error: 'Update failed: ' + err.toString() });
-  }
-}
-
-/**
- * ============================================================
- *   EXISTING FUNCTIONS (UNCHANGED)
- * ============================================================
- */
-
-function processLogin(inputId, inputPass) {
-  if (!inputId || !inputPass) return createResponse({ success: false, error: 'User Id and Password required.' });
-
+function fetchAllUsersInternal() {
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
-  if (!sheet) return createResponse({ success: false, error: "Sheet not found." });
-
-  var allData = sheet.getDataRange().getValues();
-  if (allData.length < 2) return createResponse({ success: false, error: 'No user data.' });
-
-  var userRow = null;
-  for (var i = 1; i < allData.length; i++) {
-    var row = allData[i];
-    if (String(row[COL.USER_ID] || '').trim() === inputId && String(row[COL.PASS] || '').trim() === inputPass) {
-      userRow = row; break;
-    }
-  }
-
-  if (!userRow) return createResponse({ success: false, error: 'Invalid Credentials.' });
-
-  var u = getUserFieldByIndex(userRow);
-  var role = u.role.toLowerCase();
-  var pageAccess = role === 'admin' ? 'all' : [u.master_page_access, u.tab_system_access].filter(Boolean).join(',');
-
-  return createResponse({
-    success: true, user_name: u.user_name, employee_id: u.employee_id, role: u.role,
-    designation: u.designation, shop_name: u.shops_name, email_id: u.email_id,
-    number: u.number, page_access: pageAccess
-  });
-}
-
-function fetchAllUsers() {
-  var ss = SpreadsheetApp.openById(SHEET_ID);
-  var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
-  if (!sheet) return createResponse({ success: false, error: "Sheet not found." });
-
+  if (!sheet) return { success: false, error: "Sheet not found" };
   var allData = sheet.getDataRange().getValues();
   var users = [];
-
   for (var i = 1; i < allData.length; i++) {
     var row = allData[i];
-    if (row.every(function (cell) { return String(cell).trim() === ''; })) continue;
-
+    if (row.every(function(cell) { return String(cell).trim() === ''; })) continue;
     var u = getUserFieldByIndex(row);
-    var masterArr = (u.master_page_access && u.master_page_access.toLowerCase() === 'all')
-      ? ['All'] : (u.master_page_access ? u.master_page_access.split(',').map(function (s) { return s.trim(); }).filter(Boolean) : []);
-
     users.push({
       id: i, employee_id: u.employee_id, user_name: u.user_name, designation: u.designation,
       user_id: u.user_id, password: u.password, role: u.role, email_id: u.email_id,
-      number: u.number, shops_name: u.shops_name, master_page_access: masterArr,
-      tab_system_access: parseTabAccess(u.tab_system_access)
+      number: u.number, shops_name: u.shops_name, 
+      master_page_access: (u.master_page_access.toLowerCase() === 'all' ? ['All'] : u.master_page_access.split(',').map(function(s){return s.trim();}).filter(Boolean)),
+      tab_system_access: parseTabAccess(u.tab_system_access),
+      admin_photo: u.photo
     });
   }
-  return createResponse({ success: true, data: users });
+  return { success: true, data: users };
 }
 
-function createUser(d) {
-  try {
-    var ss = SpreadsheetApp.openById(SHEET_ID);
-    var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
-    if (!sheet) return createResponse({ success: false, error: "Sheet not found." });
+function processLoginInternal(inputId, inputPass) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
+  var allData = sheet.getDataRange().getValues();
+  for (var i = 1; i < allData.length; i++) {
+    var row = allData[i];
+    if (String(row[COL.USER_ID]).trim() === String(inputId).trim() && String(row[COL.PASS]).trim() === String(inputPass).trim()) {
+      var u = getUserFieldByIndex(row);
+      var role = u.role.toLowerCase();
+      var access = role === 'admin' ? 'all' : [u.master_page_access, u.tab_system_access].filter(Boolean).join(',');
+      return { success: true, user_name: u.user_name, role: u.role, employee_id: u.employee_id, page_access: access, photo: u.photo };
+    }
+  }
+  return { success: false, error: 'Invalid Credentials' };
+}
 
-    var rowData = prepareRowArray(d);
-    sheet.appendRow(rowData);
-    return createResponse({ success: true, message: 'User created' });
-  } catch (e) {
-    return createResponse({ success: false, error: e.toString() });
+function uploadFileToDriveInternal(payload) {
+  try {
+    var folder = DriveApp.getFolderById(payload.folderId || ADMIN_AVATAR_FOLDER_ID);
+    var blob = Utilities.newBlob(Utilities.base64Decode(payload.base64Data), payload.mimeType || 'image/jpeg', payload.fileName || 'file');
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    
+    var fileId = file.getId();
+    // Return original URL in the format requested: {https://drive.google.com/open?id=...}
+    var fileUrl = '{https://drive.google.com/open?id=' + fileId + '}';
+    
+    return { success: true, fileUrl: fileUrl, fileId: fileId };
+  } catch (err) {
+    return { success: false, error: err.toString() };
   }
 }
 
-function updateUser(id, d) {
-  try {
-    var ss = SpreadsheetApp.openById(SHEET_ID);
-    var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
-    if (!sheet) return createResponse({ success: false, error: "Sheet not found." });
-
-    var rowIndex = parseInt(id) + 1; // Since id is index 'i' from fetchAllUsers, and rows are 1-based
-    var rowData = prepareRowArray(d);
-
-    sheet.getRange(rowIndex, 1, 1, TOTAL_COLS).setValues([rowData]);
-    return createResponse({ success: true, message: 'User updated' });
-  } catch (e) {
-    return createResponse({ success: false, error: e.toString() });
-  }
+function updateCellInSheetInternal(payload) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(payload.sheetName);
+  if (!sheet) return { success: false, error: 'Sheet not found' };
+  sheet.getRange(parseInt(payload.rowIndex), parseInt(payload.columnIndex)).setValue(payload.value);
+  SpreadsheetApp.flush();
+  return { success: true, message: 'Cell updated' };
 }
 
-function deleteUser(id) {
-  try {
-    var ss = SpreadsheetApp.openById(SHEET_ID);
-    var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
-    if (!sheet) return createResponse({ success: false, error: "Sheet not found." });
-
-    var rowIndex = parseInt(id) + 1;
-    sheet.deleteRow(rowIndex);
-    return createResponse({ success: true, message: 'User deleted' });
-  } catch (e) {
-    return createResponse({ success: false, error: e.toString() });
-  }
+function createUserInternal(d) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
+  sheet.appendRow(prepareRowArray(d));
+  return { success: true };
 }
 
-/** 
- * Helper to convert object data into an array matching the column order 
- */
+function updateUserInternal(id, d) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
+  sheet.getRange(parseInt(id) + 1, 1, 1, TOTAL_COLS).setValues([prepareRowArray(d)]);
+  return { success: true };
+}
+
+function deleteUserInternal(id) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sheet = ss.getSheetByName(LOGIN_TAB_NAME);
+  sheet.deleteRow(parseInt(id) + 1);
+  return { success: true };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// CORE HELPERS
+// ──────────────────────────────────────────────────────────────────────────────
+
 function prepareRowArray(d) {
-  var masterStr = Array.isArray(d.master_page_access) ? d.master_page_access.join(',') : '';
-  var tabStr = (d.tab_system_access && typeof d.tab_system_access === 'object') ?
-    Object.entries(d.tab_system_access)
-      .filter(function (entry) { return Array.isArray(entry[1]) && entry[1].length > 0; })
-      .map(function (entry) { return entry[0] + ' : ' + entry[1].join(','); })
-      .join('; ') : '';
-
   var row = new Array(TOTAL_COLS).fill('');
   row[COL.EMPLOYEE_ID] = d.employee_id || '';
   row[COL.USER_NAME] = d.user_name || '';
@@ -351,34 +345,49 @@ function prepareRowArray(d) {
   row[COL.USER_ID] = d.user_id || '';
   row[COL.PASS] = d.password || '';
   row[COL.ROLE] = d.role || 'Employee';
-  row[COL.MASTER_PAGE_ACCESS] = masterStr;
-  row[COL.TAB_SYSTEM_ACCESS] = tabStr;
+  row[COL.MASTER_PAGE_ACCESS] = Array.isArray(d.master_page_access) ? d.master_page_access.join(',') : '';
+  row[COL.TAB_SYSTEM_ACCESS] = formatTabAccessInternal(d.tab_system_access);
   row[COL.SHOPS_NAME] = d.shops_name || '';
   row[COL.GMAIL_ID] = d.email_id || '';
   row[COL.NUMBER] = d.number || '';
+  row[COL.PHOTO] = d.photo || d.photo_url || d.admin_photo || '';
   return row;
 }
 
 function getUserFieldByIndex(row) {
   return {
-    employee_id: String(row[COL.EMPLOYEE_ID] || '').trim(), user_name: String(row[COL.USER_NAME] || '').trim(),
-    designation: String(row[COL.DESIGNATION] || '').trim(), user_id: String(row[COL.USER_ID] || '').trim(),
-    password: String(row[COL.PASS] || '').trim(), role: String(row[COL.ROLE] || '').trim(),
-    master_page_access: String(row[COL.MASTER_PAGE_ACCESS] || '').trim(), tab_system_access: String(row[COL.TAB_SYSTEM_ACCESS] || '').trim(),
-    shops_name: String(row[COL.SHOPS_NAME] || '').trim(), email_id: String(row[COL.GMAIL_ID] || '').trim(),
-    number: String(row[COL.NUMBER] || '').trim()
+    employee_id: String(row[COL.EMPLOYEE_ID] || '').trim(), 
+    user_name: String(row[COL.USER_NAME] || '').trim(),
+    designation: String(row[COL.DESIGNATION] || '').trim(), 
+    user_id: String(row[COL.USER_ID] || '').trim(),
+    password: String(row[COL.PASS] || '').trim(), 
+    role: String(row[COL.ROLE] || '').trim(),
+    master_page_access: String(row[COL.MASTER_PAGE_ACCESS] || '').trim(), 
+    tab_system_access: String(row[COL.TAB_SYSTEM_ACCESS] || '').trim(),
+    shops_name: String(row[COL.SHOPS_NAME] || '').trim(), 
+    email_id: String(row[COL.GMAIL_ID] || '').trim(),
+    number: String(row[COL.NUMBER] || '').trim(),
+    photo: String(row[COL.PHOTO] || '').trim()
   };
 }
 
+function formatTabAccessInternal(access) {
+  if (!access || typeof access !== 'object') return '';
+  return Object.entries(access)
+    .filter(function(e) { return Array.isArray(e[1]) && e[1].length > 0; })
+    .map(function(e) { return e[0] + ' : ' + e[1].join(','); })
+    .join('; ');
+}
+
 function parseTabAccess(raw) {
-  var result = {};
-  if (!raw || raw.toLowerCase() === 'all') return result;
-  raw.split(';').forEach(function (entry) {
-    var colonIdx = entry.indexOf(':');
-    if (colonIdx === -1) return;
-    var page = entry.substring(0, colonIdx).trim();
-    var tabs = entry.substring(colonIdx + 1).split(',').map(function (t) { return t.trim(); }).filter(Boolean);
-    if (page && tabs.length > 0) result[page] = tabs;
+  var res = {};
+  if (!raw || raw.toLowerCase() === 'all') return res;
+  raw.split(';').forEach(function(e) {
+    var parts = e.split(':');
+    if (parts.length < 2) return;
+    var page = parts[0].trim();
+    var tabs = parts[1].split(',').map(function(t){return t.trim();}).filter(Boolean);
+    if (page && tabs.length > 0) res[page] = tabs;
   });
-  return result;
+  return res;
 }
