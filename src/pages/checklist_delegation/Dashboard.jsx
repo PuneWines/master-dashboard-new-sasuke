@@ -29,6 +29,7 @@ export default function AdminDashboard() {
   const [masterSheetOptions, setMasterSheetOptions] = useState([])
   const [selectedMasterOption, setSelectedMasterOption] = useState("")
   const [isFetchingMaster, setIsFetchingMaster] = useState(false)
+  const [masterRows, setMasterRows] = useState([]) // Store full master sheet data
 
   // ADD: Loading state for department changes
   const [isDepartmentLoading, setIsDepartmentLoading] = useState(false)
@@ -298,7 +299,8 @@ export default function AdminDashboard() {
           department: row?.c?.[0]?.v,
           userName: row?.c?.[2]?.v,       // Column C
           userRole: row?.c?.[4]?.v,
-          accessDepartments: row?.c?.[9]?.v
+          accessDepartments: row?.c?.[9]?.v,
+          rawRow: row // Keep the raw row for filtering
         })).filter(item =>
           item.userName !== null &&
           item.userName !== undefined &&
@@ -342,12 +344,15 @@ export default function AdminDashboard() {
           setSelectedMasterOption("Select Department")
         }
 
-        const activeStaffCount = data.table.rows
+        setMasterRows(data.table.rows.slice(1)) // Store rows for department-specific active staff count
+        
+        // Initial Active Staff count (total) - will be updated when department is selected
+        const totalActiveStaff = data.table.rows
           .slice(1)
           .filter(row => row?.c?.[2]?.v !== null && row?.c?.[2]?.v !== undefined && row?.c?.[2]?.v !== "")
           .length
 
-        setDepartmentData(prev => ({ ...prev, activeStaff: activeStaffCount }))
+        setDepartmentData(prev => ({ ...prev, activeStaff: totalActiveStaff }))
         return
       }
 
@@ -405,12 +410,14 @@ export default function AdminDashboard() {
         setSelectedMasterOption("Select Department")
       }
 
-      const activeStaffCount = fallbackData.table.rows
+      setMasterRows(fallbackData.table.rows.slice(1))
+
+      const totalActiveStaff = fallbackData.table.rows
         .slice(1)
         .filter(row => row?.c?.[2]?.v !== null && row?.c?.[2]?.v !== "")
         .length
 
-      setDepartmentData(prev => ({ ...prev, activeStaff: activeStaffCount }))
+      setDepartmentData(prev => ({ ...prev, activeStaff: totalActiveStaff }))
 
     } catch (error) {
       console.error("Error loading master data:", error)
@@ -591,7 +598,16 @@ export default function AdminDashboard() {
         allTasks: processedRows,
         staffMembers,
         totalTasks, completedTasks, pendingTasks, overdueTasks,
-        activeStaff: departmentData.activeStaff,
+        activeStaff: (function() {
+          // Calculate active staff for the selected department
+          if (dashboardType === "delegation") return departmentData.activeStaff; // Keep previous for delegation
+          if (!department || department === "Select Department") return departmentData.activeStaff;
+          
+          return masterRows.filter(row => 
+            row?.c?.[0]?.v === department && // Col A matches department
+            row?.c?.[2]?.v !== null && row?.c?.[2]?.v !== undefined && row?.c?.[2]?.v !== "" // Col C has username
+          ).length;
+        })(),
         completionRate, barChartData, pieChartData,
         completedRatingOne, completedRatingTwo, completedRatingThreePlus,
       }
@@ -658,8 +674,30 @@ export default function AdminDashboard() {
       }
 
       preloadDepartmentData()
+    } else if (dashboardType === "checklist" && selectedMasterOption === "Select Department") {
+      // Clear data when "Select Department" is chosen
+      setDepartmentData({
+        allTasks: [],
+        staffMembers: [],
+        totalTasks: 0,
+        completedTasks: 0,
+        pendingTasks: 0,
+        overdueTasks: 0,
+        activeStaff: (function() {
+          // Reset to total organizational staff count
+          return masterRows.filter(row => 
+            row?.c?.[2]?.v !== null && row?.c?.[2]?.v !== undefined && row?.c?.[2]?.v !== ""
+          ).length;
+        })(),
+        completionRate: 0,
+        barChartData: [],
+        pieChartData: [],
+        completedRatingOne: 0,
+        completedRatingTwo: 0,
+        completedRatingThreePlus: 0,
+      })
     }
-  }, [selectedMasterOption, dashboardType]) // Depend on both for proper sync
+  }, [selectedMasterOption, dashboardType, masterRows]) // Depend on masterRows to ensure count is available
 
   useEffect(() => {
     setCurrentDate(new Date())
@@ -1423,7 +1461,11 @@ export default function AdminDashboard() {
             </div>
             <div className="p-4">
               <div className="text-3xl font-bold text-purple-700">{departmentData.activeStaff}</div>
-              <p className="text-xs text-purple-600">Total staff in Master Sheet Col C</p>
+              <p className="text-xs text-purple-600">
+                {selectedMasterOption && selectedMasterOption !== "Select Department" 
+                  ? `Staff in ${selectedMasterOption} department` 
+                  : "Total staff in organization"}
+              </p>
             </div>
           </div>
 

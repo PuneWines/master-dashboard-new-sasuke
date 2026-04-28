@@ -660,9 +660,14 @@ const AdminAdvance = () => {
                           {getTypeIcon(adv.category)}
                         </div>
                         <div className="space-y-4">
-                          <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${adv.category === 'Extra Advance' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
-                            {adv.category}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${adv.category === 'Extra Advance' ? 'bg-emerald-100 text-emerald-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                              {adv.category}
+                            </span>
+                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${adv.pending <= 0 ? 'bg-gray-100 text-gray-400 border border-gray-200' : 'bg-rose-100 text-rose-600 border border-rose-200 animate-pulse'}`}>
+                              {adv.pending <= 0 ? 'Closed' : 'Running'}
+                            </span>
+                          </div>
                           <h4 className="text-2xl font-black text-gray-900">₹{adv.amount.toLocaleString()}</h4>
                           <div className="flex items-center justify-between pt-4 border-t border-gray-50">
                             <div>

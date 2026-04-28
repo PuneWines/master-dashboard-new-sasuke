@@ -124,7 +124,7 @@ export default function AdminLayout({ children, darkMode, toggleDarkMode }) {
     }
 
     // Match based on subsystem prefix
-    const matchingSystem = systems.find(s => 
+    const matchingSystem = systems.find(s =>
       s.link && s.link.startsWith("/") && location.pathname.startsWith(s.link)
     );
 
@@ -136,7 +136,7 @@ export default function AdminLayout({ children, darkMode, toggleDarkMode }) {
 
 
   const topNavRoutes = [
-    { id: "HOME", label: "HOME", url: "/home/users" }, 
+    { id: "HOME", label: "HOME", url: "/home/users" },
     ...systems.map((s) => ({
       id: s.id.toString(),
       label: s.systems,
@@ -208,7 +208,7 @@ export default function AdminLayout({ children, darkMode, toggleDarkMode }) {
       {/* //todo: i  */}
 
       {/* Blue Navbar */}
-     <nav className="bg-gradient-to-r from-sky-900 via-blue-600 to-sky-500 text-white sticky top-[64px] z-40 shadow-lg">
+      <nav className="bg-gradient-to-r from-sky-900 via-blue-600 to-sky-500 text-white sticky top-[64px] z-40 shadow-lg">
         <div className="flex items-center overflow-x-auto scrollbar-hide">
           {filteredRoutes.map((route) => (
             <button
@@ -221,7 +221,7 @@ export default function AdminLayout({ children, darkMode, toggleDarkMode }) {
             </button>
           ))}
         </div>
-      </nav> 
+      </nav>
 
       <main className={`flex-1 ${location.pathname.startsWith('/hr_product') ? 'overflow-hidden' : 'overflow-y-auto'} bg-white`}>
 

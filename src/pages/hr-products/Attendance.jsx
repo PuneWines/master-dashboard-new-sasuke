@@ -140,6 +140,26 @@ const Attendance = () => {
     setError(null);
 
     try {
+      // Load Local Holidays
+      const localHolidaysRaw = localStorage.getItem('local_holiday_list');
+      const localHolidays = localHolidaysRaw ? JSON.parse(localHolidaysRaw) : [];
+      
+      const isHoliday = (dateStr) => {
+        if (!dateStr) return false;
+        const compareStr = dateStr.includes(' ') ? dateStr.split(' ')[0] : dateStr;
+        return localHolidays.some(h => h.date === compareStr);
+      };
+
+      // Count holidays in selected month
+      let holidaysInMonth = 0;
+      const daysInMonthTotal = getDaysInMonth(selectedMonth, selectedYear);
+      for (let i = 1; i <= daysInMonthTotal; i++) {
+        const d = new Date(selectedYear, selectedMonth - 1, i);
+        const dateKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        if (localHolidays.some(h => h.date === dateKey)) {
+           holidaysInMonth++;
+        }
+      }
       // 1. Fetch Metadata (Joining & Master Mapping)
       let currentJoining = joiningData;
       if (joiningData.length === 0) {
@@ -284,7 +304,10 @@ const Attendance = () => {
         }
 
         const agg = monthlyAgg[id];
-        agg.presentDays += 1;
+        // Only count as machine present if it's NOT a holiday (holidays are added later)
+        if (!isHoliday(day.date)) {
+          agg.presentDays += 1;
+        }
 
         const inTime = day.logs[0];
         const outTime = day.logs[day.logs.length - 1];
@@ -335,13 +358,13 @@ const Attendance = () => {
           storeName: displayStore,
           deviceId: displayDeviceId,
           serialNo: displayAssignedSerial,
-          presentDays: agg.presentDays,
-          absentDays: absentDays,
+          presentDays: agg.presentDays + holidaysInMonth,
+          absentDays: Math.max(0, totalDaysInMonth - (agg.presentDays + holidaysInMonth)),
           punchMiss: agg.punchMissDays,
           lateDays: agg.lateDays,
           totalWorkHours: formatSecsToHrsMins(agg.totalWorkSecs),
           totalLunchTime: formatSecsToHrsMins(agg.totalLunchSecs),
-          holidays: totalSundays
+          holidays: holidaysInMonth
         };
       });
 

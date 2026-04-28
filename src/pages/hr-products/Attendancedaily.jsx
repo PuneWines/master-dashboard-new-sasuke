@@ -615,12 +615,63 @@ const Attendancedaily = () => {
         };
       });
 
-      aggregatedData.sort((a, b) => {
+      // Post-process for Holidays: Ensure ALL employees are PRESENT on holiday dates
+      const rangeDates = getDatesInRange(queryStart, queryEnd);
+      const holidayDatesInSelectedRange = rangeDates.filter(d => holidayData.some(h => h.date === d));
+
+      let finalAggregated = [...aggregatedData];
+
+      holidayDatesInSelectedRange.forEach(hDate => {
+        const holidayInfo = holidayData.find(h => h.date === hDate);
+        currentJoining.forEach(emp => {
+          const existingIdx = finalAggregated.findIndex(a => a.EmployeeID === emp.id && a.Date === hDate);
+          if (existingIdx !== -1) {
+            // Force present status for existing record
+            finalAggregated[existingIdx] = {
+              ...finalAggregated[existingIdx],
+              Status: 'PRESENT',
+              StatusReason: `Holiday: ${holidayInfo.name}`,
+              LateMinute: 0,
+              PunchMiss: 'No',
+              PunchMissMsg: ''
+            };
+          } else {
+            // Add new record for employee who didn't punch on holiday
+            finalAggregated.push({
+              EmployeeID: emp.id,
+              EmployeeName: emp.name,
+              Date: hDate,
+              Day: new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date(hDate)),
+              IsWorkingDay: 'Yes',
+              InTime: '-',
+              StandardLunch: '00:00:00',
+              WasteTime: '00:00:00',
+              OutTime: '-',
+              PunchLog: 'Holiday (No Punch)',
+              PunchLogStatus: 'Bahar',
+              StoreName: emp.store || '-',
+              DeviceID: '-',
+              Designation: emp.designation || '-',
+              SerialNumber: '-',
+              AssignedSerial: '-',
+              Status: 'PRESENT',
+              StatusReason: `Holiday: ${holidayInfo.name}`,
+              WorkingHour: '00:00:00',
+              Overtime: '0h 0m',
+              LateMinute: 0,
+              PunchMiss: 'No',
+              PunchMissMsg: ''
+            });
+          }
+        });
+      });
+
+      finalAggregated.sort((a, b) => {
         const dateA = new Date(a.Date);
         const dateB = new Date(b.Date);
         return dateB - dateA;
       });
-      setAttendanceData(aggregatedData);
+      setAttendanceData(finalAggregated);
 
       // Process individual log entries for the "Attendance Log" table
       const processedRawLogs = filteredLogs.map(log => {
@@ -672,11 +723,15 @@ const Attendancedaily = () => {
   useEffect(() => {
     const fetchHolidays = async () => {
       try {
+        const localHolidaysRaw = localStorage.getItem('local_holiday_list');
+        const localHolidays = localHolidaysRaw ? JSON.parse(localHolidaysRaw) : [];
+        
         const response = await fetch(HOLIDAY_API_URL);
         const result = await response.json();
+        let apiHolidays = [];
         if (result.success) {
           const rows = result.data.slice(1);
-          const processedHolidays = rows.map(r => {
+          apiHolidays = rows.map(r => {
             if (!r[0]) return null;
             let formattedDate = r[0].toString().trim();
             if (formattedDate.includes('/')) {
@@ -691,9 +746,22 @@ const Attendancedaily = () => {
             }
             return { date: formattedDate, name: (r[2] || r[1] || 'Holiday').toString().trim() };
           }).filter(h => h && h.date);
-          setHolidayData(processedHolidays);
         }
-      } catch (e) { console.error('Holiday fetch error:', e); }
+        
+        // Merge API and Local Holidays (Local takes precedence)
+        const combined = [...localHolidays];
+        apiHolidays.forEach(ah => {
+          if (!combined.some(lh => lh.date === ah.date)) {
+            combined.push(ah);
+          }
+        });
+        setHolidayData(combined);
+      } catch (e) { 
+        console.error('Holiday fetch error:', e);
+        // Fallback to local if API fails
+        const localHolidaysRaw = localStorage.getItem('local_holiday_list');
+        if (localHolidaysRaw) setHolidayData(JSON.parse(localHolidaysRaw));
+      }
     };
     fetchHolidays();
   }, []);

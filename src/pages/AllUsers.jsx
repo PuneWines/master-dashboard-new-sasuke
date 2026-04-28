@@ -1151,7 +1151,7 @@ const HomePage = () => {
 
                         {/* Mid Section Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
-                            <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-6 flex flex-col hover:shadow-2xl transition-all">
+                            <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-6 flex flex-col hover:shadow-2xl transition-all min-h-[580px]">
                                 <div className="flex items-center justify-between mb-4">
                                     <div className="flex items-center gap-3">
                                         <h3 className="text-xl font-bold text-gray-800">Today's Tasks</h3>
@@ -1184,7 +1184,7 @@ const HomePage = () => {
                                         <ListTodo className="text-blue-500 h-6 w-6" />
                                     </div>
                                 </div>
-                                <div className="flex-1 overflow-y-auto max-h-[300px] w-full custom-scrollbar">
+                                <div className="flex-1 overflow-y-auto max-h-[460px] w-full custom-scrollbar">
                                     {isTasksLoading ? (
                                         <div className="flex flex-col items-center justify-center py-10 space-y-3">
                                             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600"></div>
@@ -1237,7 +1237,7 @@ const HomePage = () => {
                                 </div>
                             </div>
 
-                            <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8 flex flex-col hover:shadow-2xl transition-all relative overflow-hidden group">
+                            <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-8 flex flex-col hover:shadow-2xl transition-all relative overflow-hidden group min-h-[580px]">
                                 <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform">
                                     <Activity size={120} />
                                 </div>

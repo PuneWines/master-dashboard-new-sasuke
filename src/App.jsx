@@ -81,6 +81,8 @@ import Report           from "./pages/hr-products/Report";
 import SocialSite       from "./pages/hr-products/SocialSite";
 import Advance          from "./pages/hr-products/Advance";
 import AdminAdvance     from "./pages/hr-products/AdminAdvance";
+import HolidayList      from "./pages/hr-products/HolidayList";
+import WorkingDayCalendar from "./pages/hr-products/WorkingDayCalendar";
 
 // ─────────────────────────────────────────────
 // ProtectedRoute — localStorage (HR + Master)
@@ -313,6 +315,8 @@ function App() {
             <Route path="social-site"        element={<SocialSite />} />
             <Route path="advance"           element={<Advance />} />
             <Route path="admin-advance"     element={<AdminAdvance />} />
+            <Route path="holiday-list"      element={<HolidayList />} />
+            <Route path="working-day-calendar" element={<WorkingDayCalendar />} />
           </Route>
 
           {/* ── Backward compatibility ── */}
