@@ -606,7 +606,7 @@ const Attendancedaily = () => {
           AssignedSerial: displayAssignedSerial,
           Status: status,
           StatusReason: statusReason,
-          WorkingHour: workHrs,
+          WorkingHour: calculateHoursMins(netWorkMs),
           Overtime: overtimeHrs,
           LateMinute: lateMins,
           PunchMiss: (inTime === '-' || outTime === '-') && !(inTime === '-' && outTime === '-') ? 'Yes' : 'No',

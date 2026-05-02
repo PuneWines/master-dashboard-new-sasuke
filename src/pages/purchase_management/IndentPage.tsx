@@ -73,15 +73,15 @@ export const IndentPage: React.FC = () => {
         const allowedShops =
           userShopRaw && userShopRaw.toLowerCase() !== "all"
             ? userShopRaw
-                .split(",")
-                .map((s) => s.trim().toLowerCase())
-                .filter(Boolean)
+              .split(",")
+              .map((s) => s.trim().toLowerCase())
+              .filter(Boolean)
             : null;
         const filtered =
           allowedShops
             ? data.filter((i: any) =>
-                allowedShops.includes((i.shopName || "").trim().toLowerCase())
-              )
+              allowedShops.includes((i.shopName || "").trim().toLowerCase())
+            )
             : data;
         setIndents(filtered);
       } catch (err) {
@@ -339,9 +339,8 @@ export const IndentPage: React.FC = () => {
                         .map((option: string) => (
                           <div
                             key={option}
-                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${
-                              filterValue === option ? "bg-blue-100" : ""
-                            }`}
+                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${filterValue === option ? "bg-blue-100" : ""
+                              }`}
                             onClick={() => {
                               setFilterValue(option);
                               setFilterSearch(option);
@@ -487,11 +486,10 @@ export const IndentPage: React.FC = () => {
                           {columnVisibility.approved && (
                             <td className="px-4 py-4 whitespace-nowrap">
                               <span
-                                className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                  indent.approved === "Yes"
+                                className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
                                     ? "bg-green-100 text-green-800"
                                     : "bg-yellow-100 text-yellow-800"
-                                }`}
+                                  }`}
                               >
                                 {indent.approved}
                               </span>
@@ -571,11 +569,10 @@ export const IndentPage: React.FC = () => {
                       </div>
                     </div>
                     <span
-                      className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        indent.approved === "Yes"
+                      className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
                           ? "bg-green-100 text-green-800"
                           : "bg-yellow-100 text-yellow-800"
-                      }`}
+                        }`}
                     >
                       {indent.approved}
                     </span>

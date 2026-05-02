@@ -6,8 +6,8 @@ const SCRIPT_URL =
   import.meta.env.DEV || _isLocalhost
     ? "/gas"
     : import.meta.env.VITE_GOOGLE_SCRIPT_URL || "/api/gas";
-const SHEET_ID = import.meta.env.VITE_SHEET_ID || "";
-const SHEET_NAME = import.meta.env.VITE_SHEET_NAME || "FMS"; // default tab name per user
+const SHEET_ID = "1wLoAl2i3iNFDHjFvY1WM6EZmgsuxMmyiZtHRT2PdL0k";
+const SHEET_NAME = "All Indent"; // default tab name per user
 
 export interface LoginUser {
   userName: string;
@@ -58,9 +58,8 @@ const fetchTimestampIndentMap = async (): Promise<Record<string, string>> => {
       absolute.searchParams.set("range", `${SHEET_NAME}!A:B`);
       urlStr = absolute.toString();
     } catch {
-      urlStr = `${base}${
-        base.includes("?") ? "&" : "?"
-      }range=${encodeURIComponent(`${SHEET_NAME}!A:B`)}`;
+      urlStr = `${base}${base.includes("?") ? "&" : "?"
+        }range=${encodeURIComponent(`${SHEET_NAME}!A:B`)}`;
     }
 
     const res = await fetch(urlStr, {
@@ -112,6 +111,16 @@ export interface IndentItem {
   reorderQuantityBox: number;
   shopName: string;
   orderBy: string;
+  partyName: string; // New field replacing traderName
+  perDayAvgBoxSale: number; // New field
+  // Index Sheet specific fields
+  shopId?: string;
+  partyId?: string;
+  brandId?: string;
+  liquorType?: string;
+  closingStockInBox?: number;
+  perDayAvgSaleFix?: number;
+  perDayAvgSaleLastWeek?: number;
   // Approval fields
   shopManagerStatus?: string;
   remarks?: string;
@@ -196,6 +205,8 @@ const getMockData = (): IndentItem[] => {
       sizes: ["750ml"],
       poDate: "15/01/2024", // Mock PO Date
       poCopyLink: "https://example.com/po-copy.pdf", // Mock PO Copy
+      partyName: "Sample Trader",
+      perDayAvgBoxSale: 1.5,
     },
   ];
 };
@@ -223,6 +234,7 @@ interface IndentService {
   getColumnAData(): Promise<string[]>;
   getTimestampsByIndent(): Promise<Record<string, string>>;
   getProcessedPOIndentNumbers(): Promise<Set<string>>;
+  getTraderNames(): Promise<string[]>;
 }
 
 // Function to fetch data from column A of the FMS sheet
@@ -243,9 +255,8 @@ const fetchColumnAData = async (): Promise<string[]> => {
       absolute.searchParams.set("range", `${SHEET_NAME}!A:A`);
       urlStr = absolute.toString();
     } catch {
-      urlStr = `${base}${
-        base.includes("?") ? "&" : "?"
-      }range=${encodeURIComponent(`${SHEET_NAME}!A:A`)}`;
+      urlStr = `${base}${base.includes("?") ? "&" : "?"
+        }range=${encodeURIComponent(`${SHEET_NAME}!A:A`)}`;
     }
 
     const response = await fetch(urlStr, {
@@ -310,9 +321,8 @@ const fetchProcessedPOIndentNumbers = async (): Promise<Set<string>> => {
       absolute.searchParams.set("range", "PO!B:B");
       urlStr = absolute.toString();
     } catch {
-      urlStr = `${base}${
-        base.includes("?") ? "&" : "?"
-      }range=${encodeURIComponent("PO!B:B")}`;
+      urlStr = `${base}${base.includes("?") ? "&" : "?"
+        }range=${encodeURIComponent("PO!B:B")}`;
     }
 
     const response = await fetch(urlStr, {
@@ -413,8 +423,8 @@ export const indentService: IndentService = {
         Array.isArray(data)
           ? `array_len=${data.length}`
           : typeof data === "object" && data
-          ? `keys=${Object.keys(data).slice(0, 10).join(",")}`
-          : typeof data
+            ? `keys=${Object.keys(data).slice(0, 10).join(",")}`
+            : typeof data
       );
 
       // Helpers to normalize and extract values regardless of header formatting
@@ -474,21 +484,6 @@ export const indentService: IndentService = {
         // Use Indent Number as id when an explicit id is not provided
         id: String(
           item.id ||
-            val(
-              item,
-              [
-                "Indent Number",
-                "IndentNumber",
-                "indent_number",
-                "Indent No",
-                "IndentNo",
-                "indent",
-                "#2",
-              ],
-              `indent-${index}`
-            )
-        ),
-        indentNumber: String(
           val(
             item,
             [
@@ -500,91 +495,63 @@ export const indentService: IndentService = {
               "indent",
               "#2",
             ],
+            `indent-${index}`
+          )
+        ),
+        indentNumber: String(
+          val(
+            item,
+            [
+              "Indent Number",
+              "INDENT NUMBER",
+              "Indent Number",
+              "IndentNumber",
+              "Indent No",
+              "IndentNo",
+              "indent",
+              "#1",
+            ],
             ""
           )
         ),
         skuCode: String(val(item, ["SKU Code", "SKU", "sku_code", "sku"], "")),
-        itemName: String(val(item, ["Item Name", "Item", "item_name"], "")),
-        plannedAE: String(
-          val(item, ["Planned 4", "planned_4", "plannedAE"], "")
+        traderName: String(val(item, ["#6", "PARTY NAME", "Trader Name", "Trader", "trader_name"], "")),
+        itemName: String(val(item, ["#5", "Item Name", "Item", "item_name"], "")),
+        closingStock: num(val(item, ["#7", "BOX_CLOSING_QTY", "Closing Stock", "closing_stock"], 0)),
+        sizeML: num(val(item, ["#8", "MlS", "SIZE (ML)", "Size (ML)", "size_ml"], 0)),
+        bottlesPerCase: num(val(item, ["#9", "B/CS", "Bottles Per Case", "BottlesPerCase"], 0)),
+        perDayAvgBoxSale: num(val(item, ["#10", "PER_DAY_AVG_BOX_SALE"], 0)),
+        reorderQuantityBox: num(val(item, ["#15", "REORDER_QTY_BOX", "Reorder Quantity (Box)", "reorder_quantity_box"], 0)),
+        shopName: String(val(item, ["#16", "SHOP_NAME", "Shop Name", "shop_name"], "")),
+        orderBy: String(val(item, ["#17", "ORDER_BY", "Order By", "order_by"], "")),
+        
+        // Missing mandatory IndentItem fields:
+        brandName: String(val(item, ["#4", "Brand Name", "Brand", "brand_name"], "")),
+        moq: num(val(item, ["#11", "MOQ"], 0)),
+        maxLevel: num(val(item, ["#13", "MAX_LEVEL"], 0)),
+        reorderQuantityPcs: num(val(item, ["#14", "REORDER_QTY_PCS"], 0)),
+        approved: String(val(item, ["#18", "Approved", "Status"], "No")),
+        liquor: String(val(item, ["#12", "Liquor", "liquor_type"], "")),
+        size: String(val(item, ["Size", "size", "#8"], "")),
+        // Index Sheet new mappings
+        shopId: String(val(item, ["Shop ID", "shop_id", "ShopId"], "")),
+        partyId: String(val(item, ["Party ID", "party_id", "PartyId"], "")),
+        brandId: String(val(item, ["Brand ID", "brand_id", "BrandId"], "")),
+        liquorType: String(val(item, ["Liquor Type", "liquor_type", "LiquorType", "#12", "liquor", "Liquor"], "")),
+        closingStockInBox: num(val(item, ["Closing Stock In Box", "closing_stock_in_box", "ClosingStockInBox"], 0)),
+        perDayAvgSaleFix: num(val(item, ["Per Day Avg Sale Fix", "per_day_avg_sale_fix", "PerDayAvgSaleFix"], 0)),
+        perDayAvgSaleLastWeek: num(val(item, ["Per day Avg Sale (Last Week)", "per_day_avg_sale_last_week"], 0)),
+        
+        partyName: String(
+          val(item, ["#6", "PARTY NAME", "Trader Name", "Trader", "trader_name"], "")
         ),
-        actualAF: String(
-          val(item, ["Actual 4", "actual_4", "actualAF", "Actual 4"], "")
-        ),
-        plannedAK: String(
-          val(item, ["Planned 5", "planned_5", "plannedAK"], "")
-        ),
-        actualAL: String(
-          val(
-            item,
-            [
-              "Actual 5", // This matches your sheet header
-              "Actual AL",
-              "actual_al",
-              "actualAL",
-              "Actual5",
-              "actual_5",
-            ],
-            ""
-          )
-        ),
-        brandName: String(val(item, ["Brand Name", "Brand", "brand_name"], "")),
-        moq: num(val(item, ["MOQ", "moq"], 0)),
-        maxLevel: num(val(item, ["Max Level", "max_level", "MaxLevel"], 0)),
-        closingStock: num(
-          val(item, ["Closing Stock", "closing_stock", "Closing", "Stock"], 0)
-        ),
-        reorderQuantityPcs: num(
-          val(
-            item,
-            [
-              "Reorder Quantity (Pcs)",
-              "ReorderQuantityPcs",
-              "reorder_qty_pcs",
-              "Reorder Pcs",
-              "ReorderPcs",
-            ],
-            0
-          )
-        ),
-        approved: String(val(item, ["Approved", "Status", "approved"], "No")),
-        traderName: String(
-          val(item, ["Trader Name", "Trader", "trader_name"], "")
-        ),
-        liquor: String(val(item, ["Liquor", "liquor", "LiquorSize"], "")),
-        size: String(val(item, ["Size", "size"], "")),
-        sizeML: num(
-          val(item, ["SIZE (ML)", "Size (ML)", "size_ml", "ML", "ml"], 0)
-        ),
-        bottlesPerCase: num(
-          val(
-            item,
-            ["Bottles Per Case", "BottlesPerCase", "bpc", "bottles_per_case"],
-            0
-          )
-        ),
-        reorderQuantityBox: num(
-          val(
-            item,
-            [
-              "Reorder Quantity (Box)",
-              "ReorderQuantityBox",
-              "reorder_qty_box",
-              "Reorder Box",
-              "ReorderBox",
-            ],
-            0
-          )
-        ),
-        shopName: String(val(item, ["Shop Name", "Shop", "shop_name"], "")),
-        orderBy: String(val(item, ["Order By", "OrderBy", "order_by"], "")),
         // NEW: PO Date from Column X (Actual 3)
         poDate: String(
           val(
             item,
             [
               "Actual 3",
-              "Actual3", 
+              "Actual3",
               "actual_3",
               "PO Date",
               "po_date",
@@ -671,9 +638,9 @@ export const indentService: IndentService = {
         sizes: Array.isArray(val(item, ["Sizes", "sizes"], []))
           ? val(item, ["Sizes", "sizes"], [])
           : String(val(item, ["Sizes", "sizes"], ""))
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s),
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s),
         transporterName: String(
           val(
             item,
@@ -721,8 +688,8 @@ export const indentService: IndentService = {
           val(
             item,
             [
-              "PO Copy", 
-              "PO Copy Link", 
+              "PO Copy",
+              "PO Copy Link",
               "po_copy_link",
               "poCopyLink",
               "#27", // Column AA is index 26 (0-based), so #27
@@ -731,6 +698,58 @@ export const indentService: IndentService = {
           )
         ),
         poQty: num(val(item, ["PO Qty", "po_qty", "poQty", "PO Qty"], 0)),
+        plannedAE: String(
+          val(
+            item,
+            [
+              "Planned 4",
+              "Planned4",
+              "planned_4",
+              "Planned AE",
+              "plannedAE",
+            ],
+            ""
+          )
+        ),
+        actualAF: String(
+          val(
+            item,
+            [
+              "Actual 4",
+              "Actual4",
+              "actual_4",
+              "Actual AF",
+              "actualAF",
+            ],
+            ""
+          )
+        ),
+        plannedAK: String(
+          val(
+            item,
+            [
+              "Planned 5",
+              "Planned5",
+              "planned_5",
+              "Planned AK",
+              "plannedAK",
+            ],
+            ""
+          )
+        ),
+        actualAL: String(
+          val(
+            item,
+            [
+              "Actual 5",
+              "Actual5",
+              "actual_5",
+              "Actual AL",
+              "actualAL",
+            ],
+            ""
+          )
+        ),
         remarksFrontend: String(
           val(
             item,
@@ -824,7 +843,7 @@ export const indentService: IndentService = {
         const dd = data.data as any[];
         // Detect header row by scanning first few rows for known header names
         // Make headerRowIdx available for row index calculation
-        var headerRowIdx_SCOPED = -1; 
+        var headerRowIdx_SCOPED = -1;
 
         const normalizeKey = (k: string) =>
           k
@@ -898,18 +917,18 @@ export const indentService: IndentService = {
         // However, 'rows' might be derived differently.
         // We'll approximate: if we detected headerRowIdx, data starts at headerRowIdx + 2 (1-based).
         // If not explicit, assume row 2 (header at 1).
-        
 
-        
+
+
         // Try to recover headerRowIdx from the scope if possible, or re-detect quickly if rows came from raw data
         // Since we can't easily access the scoped headerRowIdx variable from the if/else blocks above without refactoring,
         // we will map 'mapItem' without it first, or we can trust the 'index' if the data is sequential.
         // A safer way is to just use the index passed to map, assuming 'rows' contains contagious data starting after header.
-        
+
         // Refined approach: We found 'headerRowIdx' in the 'data.data' block.
         // But scope prevents access. We'll rely on the caller or just assume basic structure.
         // Actually, let's just use the index + 2 assumption for now as most valid assumption.
-        
+
         const tMapStart = performance.now();
         // Recalculate start offset if possible.
         // For now, allow mapItem to accept a 3rd arg if we can pass it.
@@ -922,7 +941,7 @@ export const indentService: IndentService = {
           "total_ms:",
           Math.round(t3 - t0)
         );
-        
+
         // Log sample data to verify PO Date and PO Copy are being mapped
         if (mapped.length > 0) {
           console.log("🔍 Sample mapped item with PO data:", {
@@ -934,10 +953,10 @@ export const indentService: IndentService = {
             poQty: mapped[0].poQty
           });
         }
-        
+
         // Update cache
         _indentsCache = { data: mapped, timestamp: Date.now() };
-        
+
         return mapped;
       }
 
@@ -996,39 +1015,39 @@ export const indentService: IndentService = {
       // Helper to find column index in a header array
       const normalizeKey = (k: string) => k.toString().toLowerCase().replace(/[()\s_]/g, "");
       const findColInHeader = (headerArr: any[], alts: string[]) => {
-          const hn = headerArr.map(h => normalizeKey(String(h??"")));
-          for(const a of alts) {
-              const idx = hn.indexOf(normalizeKey(a));
-              if(idx !== -1) return idx;
-          }
-          return -1;
+        const hn = headerArr.map(h => normalizeKey(String(h ?? "")));
+        for (const a of alts) {
+          const idx = hn.indexOf(normalizeKey(a));
+          if (idx !== -1) return idx;
+        }
+        return -1;
       };
-      
+
       if (rowIndexOverride && rowIndexOverride > 0) {
         // --- OPTIMIZED PATH ---
         rowIndex = rowIndexOverride;
         console.log("Using cached row index:", rowIndex);
-        
+
         // Fetch only headers to map columns (very fast)
         const headerUrl = buildUrl("fetch") + "&range=" + encodeURIComponent(`${SHEET_NAME}!1:1`);
         const res = await fetch(headerUrl);
         let headerRow: any[] = [];
-        
+
         if (res.ok) {
-           const json = await res.json();
-           headerRow = (Array.isArray(json) ? json[0] : (json.values?.[0] || json.data?.[0])) || [];
+          const json = await res.json();
+          headerRow = (Array.isArray(json) ? json[0] : (json.values?.[0] || json.data?.[0])) || [];
         }
-        
+
         if (headerRow.length > 0) {
-            colApproval = findColInHeader(headerRow, patApproval);
-            colStatus = findColInHeader(headerRow, patStatus);
-            colRemarks = findColInHeader(headerRow, patRemarks);
-            colApprovalName = findColInHeader(headerRow, patApprovalName);
+          colApproval = findColInHeader(headerRow, patApproval);
+          colStatus = findColInHeader(headerRow, patStatus);
+          colRemarks = findColInHeader(headerRow, patRemarks);
+          colApprovalName = findColInHeader(headerRow, patApprovalName);
         } else {
-            console.warn("Could not fetch headers, utilizing default indices.");
-            colApproval = 18; // S
-            colStatus = 29; // AD
-            colApprovalName = 42; // AQ
+          console.warn("Could not fetch headers, utilizing default indices.");
+          colApproval = 18; // S
+          colStatus = 29; // AD
+          colApprovalName = 42; // AQ
         }
 
       } else {
@@ -1036,44 +1055,44 @@ export const indentService: IndentService = {
         console.log("Updating indent with full scan at:", buildUrl("fetch"));
         const fetchUrl = buildUrl("fetch");
         const res = await fetch(fetchUrl, {
-            method: "GET",
-            headers: { Accept: "application/json" },
-            mode: "cors",
-            cache: "no-store",
+          method: "GET",
+          headers: { Accept: "application/json" },
+          mode: "cors",
+          cache: "no-store",
         });
         if (!res.ok) throw new Error("Failed to fetch sheet data for update");
         const txt = await res.text();
         let values: any[] = [];
         try {
-            const json = JSON.parse(txt);
-            if (Array.isArray(json)) values = json;
-            else if (json && Array.isArray(json.data)) values = json.data;
-            else if (json && Array.isArray(json.values)) values = json.values;
+          const json = JSON.parse(txt);
+          if (Array.isArray(json)) values = json;
+          else if (json && Array.isArray(json.data)) values = json.data;
+          else if (json && Array.isArray(json.values)) values = json.values;
         } catch (_) { throw new Error("Invalid response format"); }
-        
+
         if (!Array.isArray(values) || values.length === 0) throw new Error("No data found");
 
         // Find header row
         let headerRowIdx = -1;
         for (let i = 0; i < Math.min(values.length, 15); i++) {
-            const row = values[i];
-            if (Array.isArray(row)) {
-                const norm = row.map((c: any) => normalizeKey(String(c ?? "")));
-                if (norm.includes("indentnumber") || norm.includes("indentno")) {
-                   headerRowIdx = i;
-                   break;
-                }
+          const row = values[i];
+          if (Array.isArray(row)) {
+            const norm = row.map((c: any) => normalizeKey(String(c ?? "")));
+            if (norm.includes("indentnumber") || norm.includes("indentno")) {
+              headerRowIdx = i;
+              break;
             }
+          }
         }
-        if (headerRowIdx < 0) headerRowIdx = 0; 
+        if (headerRowIdx < 0) headerRowIdx = 0;
         const header = values[headerRowIdx] as any[];
-        
+
         // Map Columns
         colApproval = findColInHeader(header, patApproval);
         colStatus = findColInHeader(header, patStatus);
         colRemarks = findColInHeader(header, patRemarks);
         colApprovalName = findColInHeader(header, patApprovalName);
-        
+
         // Find Row
         const colIndent = findColInHeader(header, ["Indent Number", "IndentNumber", "indent"]);
         const colSku = findColInHeader(header, ["SKU Code", "SKU", "sku"]);
@@ -1081,27 +1100,27 @@ export const indentService: IndentService = {
 
         const dataStart = headerRowIdx + 1;
         for (let i = dataStart; i < values.length; i++) {
-             const row = values[i];
-             const cell = Array.isArray(row) ? (row[colIndent >= 0 ? colIndent : 1] || row[0]) : null;
-             
-             let match = String(cell ?? "").trim() === String(id).trim();
+          const row = values[i];
+          const cell = Array.isArray(row) ? (row[colIndent >= 0 ? colIndent : 1] || row[0]) : null;
 
-             if (match && secondaryKeys) {
-                if (secondaryKeys.skuCode && colSku >= 0) {
-                    const valSku = String(row[colSku] ?? "").trim();
-                    if (valSku !== secondaryKeys.skuCode.trim()) match = false;
-                }
-                if (match && secondaryKeys.itemName && colItemName >= 0) {
-                    const valItem = String(row[colItemName] ?? "").trim().toLowerCase();
-                    const searchItem = secondaryKeys.itemName.trim().toLowerCase();
-                    if (valItem !== searchItem) match = false;
-                }
-             }
+          let match = String(cell ?? "").trim() === String(id).trim();
 
-             if (match) {
-                rowIndex = i + 1;
-                break;
-             }
+          if (match && secondaryKeys) {
+            if (secondaryKeys.skuCode && colSku >= 0) {
+              const valSku = String(row[colSku] ?? "").trim();
+              if (valSku !== secondaryKeys.skuCode.trim()) match = false;
+            }
+            if (match && secondaryKeys.itemName && colItemName >= 0) {
+              const valItem = String(row[colItemName] ?? "").trim().toLowerCase();
+              const searchItem = secondaryKeys.itemName.trim().toLowerCase();
+              if (valItem !== searchItem) match = false;
+            }
+          }
+
+          if (match) {
+            rowIndex = i + 1;
+            break;
+          }
         }
       }
 
@@ -1454,15 +1473,15 @@ export const indentService: IndentService = {
               let match = Array.isArray(row) && String(cell ?? "").trim() === String(id).trim();
 
               if (match && secondaryKeys) {
-                 if (secondaryKeys.skuCode && colSku >= 0) {
-                     const valSku = String(row[colSku] ?? "").trim();
-                     if (valSku !== secondaryKeys.skuCode.trim()) match = false;
-                 }
-                 if (match && secondaryKeys.itemName && colItemName >= 0) {
-                     const valItem = String(row[colItemName] ?? "").trim().toLowerCase();
-                     const searchItem = secondaryKeys.itemName.trim().toLowerCase();
-                     if (valItem !== searchItem) match = false;
-                 }
+                if (secondaryKeys.skuCode && colSku >= 0) {
+                  const valSku = String(row[colSku] ?? "").trim();
+                  if (valSku !== secondaryKeys.skuCode.trim()) match = false;
+                }
+                if (match && secondaryKeys.itemName && colItemName >= 0) {
+                  const valItem = String(row[colItemName] ?? "").trim().toLowerCase();
+                  const searchItem = secondaryKeys.itemName.trim().toLowerCase();
+                  if (valItem !== searchItem) match = false;
+                }
               }
 
               if (match) {
@@ -1525,6 +1544,15 @@ export const indentService: IndentService = {
               "Remarks Frontend",
               "remarks_frontend",
               "remarksFrontend", // Column AD
+            ]);
+
+            // Add Planned AE column mapping (for Get Lifting visibility)
+            const colPlannedAE = findCol([
+              "Planned 4",
+              "Planned4",
+              "planned_4",
+              "Planned AE",
+              "plannedAE",
             ]);
 
             // Add lifting field column mappings
@@ -1593,6 +1621,7 @@ export const indentService: IndentService = {
               colPONumber,
               colPOQty,
               colRemarksFrontend,
+              colPlannedAE,
               colActual4AF,
               colActualAL,
               colTransportCopy,
@@ -1666,6 +1695,8 @@ export const indentService: IndentService = {
               setPOCell(pos.colPONumber, updates.poNumber, "Po No."),
               setPOCell(pos.colPOQty, updates.poQty, "PO Qty"),
               setPOCell(pos.colRemarksFrontend, updates.remarksFrontend, "Remarks1"),
+              // Planned AE for Get Lifting visibility
+              setPOCell(pos.colPlannedAE, updates.plannedAE, "Planned 4"),
               // Lifting fields
               setPOCell(pos.colActual4AF, updates.actualAF, "Actual 4"),
               setPOCell(pos.colTransportCopy, updates.liftingData?.transportCopy, "Transport Copy"),
@@ -1901,54 +1932,78 @@ export const indentService: IndentService = {
     }
 
     try {
-      // Fetch from Master sheet
-      const url = buildUrl().replace(`sheet=${SHEET_NAME}`, `sheet=Master`);
-      console.log("Fetching transporter names from:", url);
-      const response = await fetch(url, {
+      // Build a clean URL for the Master sheet
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", SHEET_ID);
+      url.searchParams.set("sheet", "Master");
+      url.searchParams.set("range", "Master!B2:B");
+      
+      console.log("Fetching transporter names from:", url.toString());
+      const response = await fetch(url.toString(), {
         method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
+        headers: { Accept: "application/json" },
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
-      console.log("Master data for transporters:", data);
-
-      // Normalize response into an array of row objects
-      let rows: any[] = [];
-      if (Array.isArray(data)) {
-        rows = data;
-      } else if (data && Array.isArray(data.data)) {
-        rows = data.data;
-      } else if (data && Array.isArray((data as any).values)) {
-        rows = (data as any).values;
-      }
-
-      console.log("Rows to process for transporters:", rows);
+      const rows: any[] = Array.isArray(data) ? data : data.data || data.values || [];
 
       const transporters = rows
-        .slice(1) // Start from row 2 (index 1) to the end
         .map((row: any) => {
-          if (Array.isArray(row)) return String(row[1] || ""); // Column B is index 1
+          if (Array.isArray(row)) return String(row[0] || "").trim();
           return String(
-            row["Transport Name"] ||
-              row.TransportName ||
-              row["Trasnport Name"] ||
-              ""
-          );
+            row["Transport Name"] || 
+            row.TransportName || 
+            row["Trasnport Name"] || // Misspelling in sheet
+            ""
+          ).trim();
         })
         .filter(Boolean);
 
-      console.log("Transporters extracted:", transporters);
-
-      return transporters.length > 0 ? transporters : ["ABC Logistics"];
+      return transporters.length > 0 ? [...new Set(transporters)].sort() : ["ABC Logistics"];
     } catch (error) {
       console.error("Error fetching transporter names:", error);
       return ["ABC Logistics"];
+    }
+  },
+
+  async getTraderNames(): Promise<string[]> {
+    if (!SCRIPT_URL) {
+      return ["THE LIQUOR STORY", "ABC Distributors"];
+    }
+
+    try {
+      // Build a clean URL for the All Indent sheet
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", SHEET_ID);
+      url.searchParams.set("sheet", "All Indent");
+      url.searchParams.set("range", "All Indent!F7:F");
+      
+      console.log("Fetching trader names from:", url.toString());
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+      const rows: any[] = Array.isArray(data) ? data : data.data || data.values || [];
+
+      const traders = rows
+        .map((row: any) => {
+          if (Array.isArray(row)) return String(row[0] || "").trim();
+          return String(row["Trader Name"] || row.TraderName || "").trim();
+        })
+        .filter(Boolean);
+
+      return traders.length > 0 ? [...new Set(traders)].sort() : ["THE LIQUOR STORY", "ABC Distributors"];
+    } catch (error) {
+      console.error("Error fetching trader names:", error);
+      return ["THE LIQUOR STORY", "ABC Distributors"];
     }
   },
 
@@ -2011,7 +2066,7 @@ export const indentService: IndentService = {
         console.error("❌ Non-JSON response received:", text.substring(0, 500));
         throw new Error(
           "Non-JSON response from Apps Script (first 500 chars): " +
-            text.substring(0, 500)
+          text.substring(0, 500)
         );
       }
 
@@ -2141,23 +2196,23 @@ export const indentService: IndentService = {
       return users.length > 0
         ? users
         : [
-            {
-              userName: "Admin User",
-              userId: "admin",
-              password: "admin123",
-              role: "admin",
-              pageAccess: "all",
-              shopName: "all",
-            },
-            {
-              userName: "Regular User",
-              userId: "user",
-              password: "user123",
-              role: "user",
-              pageAccess: "all",
-              shopName: "all",
-            },
-          ];
+          {
+            userName: "Admin User",
+            userId: "admin",
+            password: "admin123",
+            role: "admin",
+            pageAccess: "all",
+            shopName: "all",
+          },
+          {
+            userName: "Regular User",
+            userId: "user",
+            password: "user123",
+            role: "user",
+            pageAccess: "all",
+            shopName: "all",
+          },
+        ];
     } catch (error) {
       console.error("Error fetching login users:", error);
       return [
@@ -2223,9 +2278,9 @@ export const indentService: IndentService = {
           if (Array.isArray(row)) return String(row[3] || "").trim(); // Column D is index 3
           return String(
             row["Approval Name"] ||
-              row.approvalName ||
-              row["approval name"] ||
-              ""
+            row.approvalName ||
+            row["approval name"] ||
+            ""
           ).trim();
         })
         .filter((name: string) => name); // Remove empty strings

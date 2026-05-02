@@ -385,6 +385,7 @@ export const GetLiftingPage = () => {
         status: "lifting",
         actualAF: now,
         isLifting: true,
+        plannedAK: now, // Set so item appears in Receiving pending tab
         liftingData: {
           transportCopy: bulkFormData.transportCopyUrl || "",
           billCopy: bulkFormData.billCopyUrl || "",
@@ -403,6 +404,7 @@ export const GetLiftingPage = () => {
           actualAF: now,
           shopName: indent.shopName,
           isLifting: true,
+          plannedAK: now, // Set so item appears in Receiving pending tab
           liftingData: {
             transportCopy: bulkFormData.transportCopyUrl || "",
             billCopy: bulkFormData.billCopyUrl || "",
@@ -681,6 +683,7 @@ export const GetLiftingPage = () => {
       actualAF: now,
       shopName: selectedIndent.shopName,
       isLifting: true,
+      plannedAK: now, // Set so item appears in Receiving pending tab
       liftingData: {
         transportCopy: formData.transportCopyUrl || "",
         billCopy: formData.billCopyUrl || "",

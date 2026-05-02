@@ -184,14 +184,14 @@ export const ApprovalPage: React.FC = () => {
         const allowedShops =
           userShopRaw && userShopRaw.toLowerCase() !== "all"
             ? userShopRaw
-                .split(",")
-                .map((s) => s.trim().toLowerCase())
-                .filter(Boolean)
+              .split(",")
+              .map((s) => s.trim().toLowerCase())
+              .filter(Boolean)
             : null;
         const filtered = allowedShops
           ? data.filter((i: any) =>
-              allowedShops.includes((i.shopName || "").trim().toLowerCase())
-            )
+            allowedShops.includes((i.shopName || "").trim().toLowerCase())
+          )
           : data;
         // Attach timestamps for matching Indent Numbers from FMS (A: Timestamp, B: Indent Number)
         try {
@@ -282,6 +282,28 @@ export const ApprovalPage: React.FC = () => {
     });
   };
 
+  const handleInputChange = (indent: IndentItem, field: string, value: any) => {
+    setIndents((prev) =>
+      prev.map((i) => {
+        if (getIndentKey(i) === getIndentKey(indent)) {
+          const updated = { ...i, [field]: value };
+
+          // Auto-calculate Box if Pcs changes
+          if (field === 'reorderQuantityPcs' && i.bottlesPerCase > 0) {
+            updated.reorderQuantityBox = Number((Number(value) / i.bottlesPerCase).toFixed(2));
+          }
+          // Auto-calculate Pcs if Box changes
+          if (field === 'reorderQuantityBox' && i.bottlesPerCase > 0) {
+            updated.reorderQuantityPcs = Math.round(Number(value) * i.bottlesPerCase);
+          }
+
+          return updated;
+        }
+        return i;
+      })
+    );
+  };
+
   const handleBulkApprove = async () => {
     if (selectedIds.size === 0) return;
 
@@ -315,6 +337,9 @@ export const ApprovalPage: React.FC = () => {
         ...commonUpdates,
         shopName: item.shopName,
         isApproval: true,
+        reorderQuantityPcs: item.reorderQuantityPcs,
+        traderName: item.traderName,
+        reorderQuantityBox: item.reorderQuantityBox,
       },
       secondaryKeys: {
         skuCode: item.skuCode,
@@ -372,6 +397,9 @@ export const ApprovalPage: React.FC = () => {
             ? "approved"
             : "rejected",
         actualTimestamp1: currentDate,
+        reorderQuantityPcs: selectedIndent.reorderQuantityPcs,
+        traderName: selectedIndent.traderName,
+        reorderQuantityBox: selectedIndent.reorderQuantityBox,
       };
 
       // Perform API call
@@ -390,9 +418,9 @@ export const ApprovalPage: React.FC = () => {
         const updatedIndents = indents.map((indent) =>
           indent.indentNumber === selectedIndent.indentNumber
             ? {
-                ...indent,
-                ...updates,
-              }
+              ...indent,
+              ...updates,
+            }
             : indent
         );
         setIndents(updatedIndents);
@@ -637,22 +665,20 @@ export const ApprovalPage: React.FC = () => {
               <nav className="flex -mb-px space-x-4 md:space-x-8">
                 <button
                   onClick={() => setActiveTab("pending")}
-                  className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center gap-2 ${
-                    activeTab === "pending"
+                  className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center gap-2 ${activeTab === "pending"
                       ? "border-blue-500 text-blue-600"
                       : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
+                    }`}
                 >
                   <Clock className="w-4 h-4" />
                   Pending ({pendingIndents.length})
                 </button>
                 <button
                   onClick={() => setActiveTab("history")}
-                  className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center gap-2 ${
-                    activeTab === "history"
+                  className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors duration-200 flex items-center gap-2 ${activeTab === "history"
                       ? "border-blue-500 text-blue-600"
                       : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                  }`}
+                    }`}
                 >
                   <CheckCircle className="w-4 h-4" />
                   History ({historyIndents.length})
@@ -716,11 +742,10 @@ export const ApprovalPage: React.FC = () => {
                 <button
                   onClick={handleBulkApprove}
                   disabled={selectedIds.size === 0 || isApproving}
-                  className={`px-4 py-2 text-sm rounded-lg ${
-                    selectedIds.size === 0 || isApproving
+                  className={`px-4 py-2 text-sm rounded-lg ${selectedIds.size === 0 || isApproving
                       ? "bg-gray-300 text-gray-600 cursor-not-allowed"
                       : "bg-green-600 text-white hover:bg-green-700"
-                  }`}
+                    }`}
                 >
                   {isApproving ? "Saving..." : "Approve"}
                 </button>
@@ -731,10 +756,10 @@ export const ApprovalPage: React.FC = () => {
                   onChange={(e) =>
                     setFilterField(
                       e.target.value as
-                        | "itemName"
-                        | "shopName"
-                        | "traderName"
-                        | ""
+                      | "itemName"
+                      | "shopName"
+                      | "traderName"
+                      | ""
                     )
                   }
                   className="px-3 py-2 pr-8 w-40 text-sm bg-white rounded-lg border border-gray-300 appearance-none outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
@@ -747,20 +772,20 @@ export const ApprovalPage: React.FC = () => {
                 <ChevronDown className="absolute right-2 top-1/2 w-4 h-4 text-gray-400 -translate-y-1/2 pointer-events-none" />
               </div>
               {filterField && (
-                  <div ref={filterRef} className="relative">
-                    <div className="relative">
-                        <input
-                          type="text"
-                          placeholder={`Search ${filterField.replace(
-                            "Name",
-                            ""
-                          )}...`}
-                          value={filterSearch}
-                          onChange={(e) => setFilterSearch(e.target.value)}
-                          onFocus={() => setShowFilterDropdown(true)}
-                          onClick={() => setShowFilterDropdown(true)}
-                          className="px-3 py-2 pr-8 w-40 text-sm bg-white rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                        />
+                <div ref={filterRef} className="relative">
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder={`Search ${filterField.replace(
+                        "Name",
+                        ""
+                      )}...`}
+                      value={filterSearch}
+                      onChange={(e) => setFilterSearch(e.target.value)}
+                      onFocus={() => setShowFilterDropdown(true)}
+                      onClick={() => setShowFilterDropdown(true)}
+                      className="px-3 py-2 pr-8 w-40 text-sm bg-white rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
                     <Search className="absolute right-2 top-1/2 w-4 h-4 text-gray-400 -translate-y-1/2" />
                   </div>
 
@@ -790,9 +815,8 @@ export const ApprovalPage: React.FC = () => {
                         .map((option: string) => (
                           <div
                             key={option}
-                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${
-                              filterValue === option ? "bg-blue-100" : ""
-                            }`}
+                            className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${filterValue === option ? "bg-blue-100" : ""
+                              }`}
                             onClick={() => {
                               setFilterValue(option);
                               setFilterSearch(option);
@@ -1029,7 +1053,7 @@ export const ApprovalPage: React.FC = () => {
                     {filteredIndents.length > 0 ? (
                       filteredIndents.map((indent, index) => (
                         <tr
-                          key={`${indent.indentNumber}-${indent.traderName}-${indent.shopName}-${index}`}
+                          key={`${indent.indentNumber}-${indent.skuCode}-${indent.shopName}-${index}`}
                           className="transition-colors duration-150 hover:bg-gray-50"
                         >
                           {activeTab === "pending" && (
@@ -1048,8 +1072,8 @@ export const ApprovalPage: React.FC = () => {
                             <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
                               {indent.actualTimestamp1
                                 ? formatTimestamp(
-                                    new Date(indent.actualTimestamp1)
-                                  )
+                                  new Date(indent.actualTimestamp1)
+                                )
                                 : "-"}
                             </td>
                           )}
@@ -1090,17 +1114,25 @@ export const ApprovalPage: React.FC = () => {
                           )}
                           {columnVisibility.reorderQuantityPcs && (
                             <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.reorderQuantityPcs)}
+                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
+                                <input
+                                  type="number"
+                                  value={indent.reorderQuantityPcs}
+                                  onChange={(e) => handleInputChange(indent, 'reorderQuantityPcs', e.target.value)}
+                                  className="w-24 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                              ) : (
+                                formatNumber(indent.reorderQuantityPcs)
+                              )}
                             </td>
                           )}
                           {columnVisibility.approved && (
                             <td className="px-4 py-4 whitespace-nowrap">
                               <span
-                                className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                  indent.approved === "Yes"
+                                className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
                                     ? "bg-green-100 text-green-800"
                                     : "bg-yellow-100 text-yellow-800"
-                                }`}
+                                  }`}
                               >
                                 {indent.approved}
                               </span>
@@ -1108,7 +1140,16 @@ export const ApprovalPage: React.FC = () => {
                           )}
                           {columnVisibility.traderName && (
                             <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
-                              {indent.traderName || "-"}
+                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
+                                <input
+                                  type="text"
+                                  value={indent.traderName || ""}
+                                  onChange={(e) => handleInputChange(indent, 'traderName', e.target.value)}
+                                  className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                              ) : (
+                                indent.traderName || "-"
+                              )}
                             </td>
                           )}
                           {columnVisibility.liquor && (
@@ -1133,7 +1174,16 @@ export const ApprovalPage: React.FC = () => {
                           )}
                           {columnVisibility.reorderQuantityBox && (
                             <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.reorderQuantityBox)}
+                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
+                                <input
+                                  type="number"
+                                  value={indent.reorderQuantityBox}
+                                  onChange={(e) => handleInputChange(indent, 'reorderQuantityBox', e.target.value)}
+                                  className="w-24 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                              ) : (
+                                formatNumber(indent.reorderQuantityBox)
+                              )}
                             </td>
                           )}
                           {columnVisibility.shopName && (
@@ -1150,11 +1200,10 @@ export const ApprovalPage: React.FC = () => {
                             <>
                               <td className="px-4 py-4 whitespace-nowrap">
                                 <span
-                                  className={`px-2 py-1 text-xs font-medium rounded-full ${
-                                    indent.shopManagerStatus === "Approved"
+                                  className={`px-2 py-1 text-xs font-medium rounded-full ${indent.shopManagerStatus === "Approved"
                                       ? "bg-green-100 text-green-800"
                                       : "bg-red-100 text-red-800"
-                                  }`}
+                                    }`}
                                 >
                                   {indent.shopManagerStatus}
                                 </span>
@@ -1162,8 +1211,8 @@ export const ApprovalPage: React.FC = () => {
                               <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
                                 {indent.approvalDate
                                   ? new Date(
-                                      indent.approvalDate
-                                    ).toLocaleDateString()
+                                    indent.approvalDate
+                                  ).toLocaleDateString()
                                   : "-"}
                               </td>
                               <td className="px-4 py-4 min-w-[200px] max-w-xs text-gray-600 truncate">
@@ -1198,7 +1247,7 @@ export const ApprovalPage: React.FC = () => {
             {filteredIndents.length > 0 ? (
               filteredIndents.map((indent, index) => (
                 <div
-                  key={`${indent.indentNumber}-${indent.traderName}-${indent.shopName}-${index}`}
+                  key={`${indent.indentNumber}-${indent.skuCode}-${indent.shopName}-${index}`}
                   className="p-4 space-y-3 bg-white rounded-xl border border-gray-200 shadow-md"
                 >
                   <div className="flex justify-between items-start">
@@ -1211,11 +1260,10 @@ export const ApprovalPage: React.FC = () => {
                       </div>
                     </div>
                     <span
-                      className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        indent.approved === "Yes"
+                      className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
                           ? "bg-green-100 text-green-800"
                           : "bg-yellow-100 text-yellow-800"
-                      }`}
+                        }`}
                     >
                       {indent.approved}
                     </span>
@@ -1267,11 +1315,10 @@ export const ApprovalPage: React.FC = () => {
                           Shop Manager Status:
                         </span>
                         <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            indent.shopManagerStatus === "Approved"
+                          className={`px-2 py-1 text-xs font-medium rounded-full ${indent.shopManagerStatus === "Approved"
                               ? "bg-green-100 text-green-800"
                               : "bg-red-100 text-red-800"
-                          }`}
+                            }`}
                         >
                           {indent.shopManagerStatus}
                         </span>
@@ -1482,11 +1529,10 @@ export const ApprovalPage: React.FC = () => {
               <button
                 onClick={handleSaveApproval}
                 disabled={isApproving}
-                className={`flex gap-2 justify-center items-center px-6 py-2 w-full font-medium text-white rounded-lg transition-colors duration-200 sm:w-auto ${
-                  isApproving 
-                    ? "bg-gray-400 cursor-not-allowed" 
+                className={`flex gap-2 justify-center items-center px-6 py-2 w-full font-medium text-white rounded-lg transition-colors duration-200 sm:w-auto ${isApproving
+                    ? "bg-gray-400 cursor-not-allowed"
                     : "bg-blue-600 hover:bg-blue-700"
-                }`}
+                  }`}
               >
                 {isApproving ? (
                   <>
@@ -1505,9 +1551,9 @@ export const ApprovalPage: React.FC = () => {
         </div>
       )}
       <SuccessAnimation
-         visible={showSuccessAnimation}
-         message="Approved Successfully!"
-         onComplete={() => setShowSuccessAnimation(false)}
+        visible={showSuccessAnimation}
+        message="Approved Successfully!"
+        onComplete={() => setShowSuccessAnimation(false)}
       />
     </div>
   );

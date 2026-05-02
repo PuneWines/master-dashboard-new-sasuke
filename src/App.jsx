@@ -43,6 +43,11 @@ import DocLicense from "./pages/document_manager/LicensePage";
 // ── Purchase Management Pages ──
 import PurchaseLayout            from "./components/purchase_management/Layout";
 import { Dashboard as PurchaseDashboard } from "./pages/purchase_management/Dashboard";
+import { IMSDashboard as PurchaseIMSDashboard } from "./pages/purchase_management/IMSDashboard";
+import { IndexSheetPage as PurchaseIndexSheet } from "./pages/purchase_management/IndexSheetPage";
+import { IMSDailyEntry as PurchaseDailyEntry } from "./pages/purchase_management/IMSDailyEntry";
+import { TraderForm } from "./pages/purchase_management/public/TraderForm";
+import { TransporterForm } from "./pages/purchase_management/public/TransporterForm";
 import { IndentPage as PurchaseIndent } from "./pages/purchase_management/IndentPage";
 import { ApprovalPage as PurchaseApproval } from "./pages/purchase_management/ApprovalPage";
 import { PurchaseOrderPage as PurchaseOrder } from "./pages/purchase_management/PurchaseOrderPage";
@@ -167,6 +172,10 @@ function App() {
           {/* ── Single Login ── */}
           <Route path="/"      element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<LoginPage />} />
+
+          {/* Public Workflow Forms (Purchase Management) */}
+          <Route path="/public/trader-form" element={<TraderForm />} />
+          <Route path="/public/transporter-form" element={<TransporterForm />} />
 
           {/* ════════════════════════════════════════
               MASTER DASHBOARD
@@ -365,6 +374,9 @@ function App() {
             }
           >
             <Route index                      element={<PurchaseDashboard />} />
+            <Route path="ims-dashboard"       element={<PurchaseIMSDashboard />} />
+            <Route path="index-sheet"         element={<PurchaseIndexSheet />} />
+            <Route path="daily-entry"         element={<PurchaseDailyEntry />} />
             <Route path="indent"              element={<PurchaseIndent />} />
             <Route path="approval"            element={<PurchaseApproval />} />
             <Route path="purchase-order"      element={<PurchaseOrder />} />

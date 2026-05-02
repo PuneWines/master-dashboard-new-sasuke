@@ -708,7 +708,7 @@ export default function TransactionHistory() {
           localStorage.setItem("pettyCashTransactions", JSON.stringify(updatedTransactions));
           setIsDetailModalOpen(false);
         }}
-        initialData={selectedTransaction}
+        initialData={selectedTransaction as any}
       />
       <CashTally
         isOpen={isCashTallyModalOpen}

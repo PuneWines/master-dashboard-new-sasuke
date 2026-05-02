@@ -70,7 +70,7 @@ async function requestGAS(params: Record<string, any>, method: 'GET' | 'POST' = 
         }
 
         let text = await response.text();
-        
+
         // Strip JSONP wrapper if present (e.g. callback([...]))
         // This handles cases where GAS returns a callback string instead of pure JSON
         const trimmed = text.trim();
@@ -115,15 +115,48 @@ async function fetchHistoryFromGAS(): Promise<HistoryRow[]> {
 async function sendViaMaytapi(
     number: string,
     message: string,
-    fileData?: { base64: string; mimeType: string; fileName: string } | null
+    fileData?: { base64: string; mimeType: string; fileName: string } | null,
+    driveUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
     try {
-        const payload = {
-            to_number: '91' + number.trim(),
-            type: 'text',
-            message: message,
-            text: message,
-        };
+        let payload: Record<string, any>;
+
+        if (fileData && driveUrl) {
+            // Send as media message with Drive URL
+            payload = {
+                to_number: '91' + number.trim(),
+                type: 'media',
+                message: driveUrl,
+                text: message,
+            };
+        } else if (fileData && !driveUrl) {
+            // Fallback: send base64 for images < 1MB, otherwise text-only
+            const isImage = fileData.mimeType.startsWith('image/');
+            if (isImage && fileData.base64.length < 1_000_000) {
+                payload = {
+                    to_number: '91' + number.trim(),
+                    type: 'media',
+                    message: `data:${fileData.mimeType};base64,${fileData.base64}`,
+                    text: message,
+                };
+            } else {
+                // Can't send non-image or large file without URL, send text only
+                payload = {
+                    to_number: '91' + number.trim(),
+                    type: 'text',
+                    message: message,
+                    text: message,
+                };
+            }
+        } else {
+            // Plain text message
+            payload = {
+                to_number: '91' + number.trim(),
+                type: 'text',
+                message: message,
+                text: message,
+            };
+        }
 
         const res = await fetch(MAYTAPI_BASE, {
             method: 'POST',
@@ -165,7 +198,7 @@ const WhatsappSendMessage: React.FC = () => {
     const [selectedShop, setSelectedShop] = useState<string>('');
     const [contacts, setContacts] = useState<any[][]>([]);
     const [selectedContacts, setSelectedContacts] = useState<number[]>([]);
-    const [fileName, setFileName] = useState<string>('No File Selected');
+    const [fileNames, setFileNames] = useState<string[]>([]);
     const [status, setStatus] = useState<{ message: string; type: string }>({ message: '', type: '' });
     const [sendResults, setSendResults] = useState<SendResult[]>([]);
     const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -245,8 +278,25 @@ const WhatsappSendMessage: React.FC = () => {
     const handleContactToggle = (i: number) =>
         setSelectedContacts(p => p.includes(i) ? p.filter(x => x !== i) : [...p, i]);
 
-    const handleFileChange = (e: ChangeEvent<HTMLInputElement>) =>
-        setFileName(e.target.files?.[0]?.name ?? 'No File Selected');
+    const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (files && files.length > 0) {
+            setFileNames(Array.from(files).map(f => f.name));
+        } else {
+            setFileNames([]);
+        }
+    };
+
+    const handleRemoveFile = (indexToRemove: number) => {
+        // We can't directly modify FileList, so we need to clear and re-set
+        // For simplicity, we remove from display; the actual FileList stays but we track indices to skip
+        setFileNames(prev => prev.filter((_, i) => i !== indexToRemove));
+        // If all removed, also clear the input
+        if (fileNames.length <= 1) {
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            setFileNames([]);
+        }
+    };
 
     const fileToBase64 = (file: File): Promise<string> =>
         new Promise((res, rej) => {
@@ -274,53 +324,69 @@ const WhatsappSendMessage: React.FC = () => {
         const names = selectedContacts.map(i => contacts[i][1] as string);
         const numbers = selectedContacts.map(i => contacts[i][2] as string);
 
-        // ── File handling ───────────────────────────────────────────────────
-        let filePayload: { base64: string; mimeType: string; fileName: string } | null = null;
+        // ── Multiple File handling ──────────────────────────────────────────
+        const rawFiles = fileInputRef.current?.files;
+        const validFiles: File[] = [];
 
-        const rawFile = fileInputRef.current?.files?.[0];
-        if (rawFile) {
-            if (rawFile.size > 5 * 1024 * 1024) {
-                setStatus({ message: '❌ File too large! Max 5 MB allowed.', type: 'error' });
-                setIsSubmitting(false);
-                return;
+        if (rawFiles && rawFiles.length > 0) {
+            // Only process files whose names are still in fileNames (not removed by user)
+            for (let f = 0; f < rawFiles.length; f++) {
+                const file = rawFiles[f];
+                if (!fileNames.includes(file.name)) continue; // user removed this file
+                if (file.size > 5 * 1024 * 1024) {
+                    setStatus({ message: `❌ File "${file.name}" is too large! Max 5 MB per file.`, type: 'error' });
+                    setIsSubmitting(false);
+                    return;
+                }
+                validFiles.push(file);
             }
-            setStatus({ message: '⏳ Reading file...', type: 'loading' });
-            const base64 = await fileToBase64(rawFile);
-            filePayload = { base64, mimeType: rawFile.type, fileName: rawFile.name };
         }
 
-        // ── Save to GAS User sheet & Get Drive URL ────────────────────────
+        // ── Build file payloads ──────────────────────────────────────────────
+        const filePayloads: { base64: string; mimeType: string; fileName: string }[] = [];
+
+        if (validFiles.length > 0) {
+            setStatus({ message: `⏳ Reading ${validFiles.length} file(s)...`, type: 'loading' });
+            for (const file of validFiles) {
+                const base64 = await fileToBase64(file);
+                filePayloads.push({ base64, mimeType: file.type, fileName: file.name });
+            }
+        }
+
+        // ── Save to GAS User sheet & Get Drive URLs ─────────────────────────
         const namesStr = names.join(', ');
         const numbersStr = numbers.join(', ');
+        const driveLinks: string[] = [];
 
-        setStatus({ message: filePayload ? '⏳ Uploading file to Drive & saving record...' : '⏳ Saving record to Sheet...', type: 'loading' });
-
-        const gasRes = await requestGAS({
-            action: 'submitFormData',
-            message: messageBody,
-            shopName: selectedShop,
-            names: namesStr,
-            numbers: numbersStr,
-            file: filePayload ? { name: rawFile!.name, type: rawFile!.type, data: filePayload.base64 } : null,
-        }, 'POST');
-
-        const driveLink = gasRes?.fileUrl || '';
-
-        // ── Build final message ─────────────────────────────────────────────
-        let finalMessage = messageBody.trim();
-        if (filePayload) {
-            const isMedia = filePayload.mimeType.startsWith('image/') ||
-                filePayload.mimeType.startsWith('video/') ||
-                filePayload.mimeType.startsWith('audio/');
-
-            finalMessage += `\n\n📎 *${filePayload.fileName}*`;
-
-            if (driveLink) {
-                finalMessage += `\n🔗 View/Download File: ${driveLink}`;
-            } else if (!isMedia) {
-                // Fallback if drive upload failed and it's not a media file
-                finalMessage += `\n⬇️ (File attached — ask admin for download link)`;
+        if (filePayloads.length > 0) {
+            setStatus({ message: `⏳ Uploading ${filePayloads.length} file(s) to Drive & saving record...`, type: 'loading' });
+            for (let f = 0; f < filePayloads.length; f++) {
+                const fp = filePayloads[f];
+                try {
+                    const gasRes = await requestGAS({
+                        action: 'submitFormData',
+                        message: f === 0 ? messageBody : `[File ${f + 1}/${filePayloads.length}]`,
+                        shopName: selectedShop,
+                        names: namesStr,
+                        numbers: numbersStr,
+                        file: { name: fp.fileName, type: fp.mimeType, data: fp.base64 },
+                    }, 'POST');
+                    driveLinks.push(gasRes?.fileUrl || '');
+                } catch {
+                    driveLinks.push('');
+                }
             }
+        } else {
+            // No files — just save the text record
+            setStatus({ message: '⏳ Saving record to Sheet...', type: 'loading' });
+            await requestGAS({
+                action: 'submitFormData',
+                message: messageBody,
+                shopName: selectedShop,
+                names: namesStr,
+                numbers: numbersStr,
+                file: null,
+            }, 'POST');
         }
 
         // ── Send to each contact via Maytapi ────────────────────────────────
@@ -329,11 +395,35 @@ const WhatsappSendMessage: React.FC = () => {
         const initial: SendResult[] = numbers.map(n => ({ number: n, status: 'Sending' }));
         setSendResults([...initial]);
 
+        // ── Build Single Message Box ───────────────────────────────────────
+        let finalMessage = messageBody.trim();
+        if (filePayloads.length > 0) {
+            finalMessage += `\n\n📂 *Attached Files:*`;
+            for (let f = 0; f < filePayloads.length; f++) {
+                finalMessage += `\n${f + 1}️⃣ *${filePayloads[f].fileName}*`;
+                if (driveLinks[f]) {
+                    finalMessage += `\n🔗 View/Download: ${driveLinks[f]}`;
+                }
+                if (f < filePayloads.length - 1) finalMessage += '\n';
+            }
+        }
+
+        const firstFile = filePayloads.length > 0 ? filePayloads[0] : null;
+        const firstLink = driveLinks.length > 0 ? driveLinks[0] : undefined;
+
         for (let i = 0; i < numbers.length; i++) {
             const number = String(numbers[i]).trim();
+            const contactName = String(names[i] || '').trim();
             if (!number) continue;
 
-            const result = await sendViaMaytapi(number, finalMessage, filePayload);
+            // Personalize the message for each contact
+            let personalizedMessage = finalMessage
+                .replace(/\$\(User Name\)/gi, contactName)
+                .replace(/\$\(Name\)/gi, contactName)
+                .replace(/\{\{Name\}\}/gi, contactName);
+
+            // 1️⃣ Send the single combined message
+            const result = await sendViaMaytapi(number, personalizedMessage, firstFile, firstLink);
 
             setSendResults(prev => {
                 const updated = [...prev];
@@ -348,14 +438,19 @@ const WhatsappSendMessage: React.FC = () => {
             if (i < numbers.length - 1) await new Promise(r => setTimeout(r, 1000));
         }
 
-        setStatus({ message: `✅ Done! Check results below.`, type: 'success' });
+        setStatus({ message: `✅ Done! All messages sent. Form will refresh in 4 seconds...`, type: 'success' });
+
+        // Auto-refresh the page after 4 seconds
+        setTimeout(() => {
+            window.location.reload();
+        }, 4000);
 
         // ── Reset form ──────────────────────────────────────────────────────
         setMessageBody('');
         setSelectedShop('');
         setContacts([]);
         setSelectedContacts([]);
-        setFileName('No File Selected');
+        setFileNames([]);
         if (fileInputRef.current) fileInputRef.current.value = '';
         setIsSubmitting(false);
     };
@@ -569,10 +664,12 @@ const WhatsappSendMessage: React.FC = () => {
 
                         {/* Message */}
                         <div className="space-y-2">
-                            <label className="block font-bold text-gray-700 text-sm">Message</label>
+                            <label className="block font-bold text-gray-700 text-sm">
+                                Message <span className="text-gray-400 font-normal ml-2 text-xs">(Use <code className="bg-gray-100 px-1 py-0.5 rounded text-gray-600">$(User Name)</code> to insert contact's name)</span>
+                            </label>
                             <textarea
                                 className="w-full p-4 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-400 focus:border-transparent outline-none transition-all min-h-[120px] text-gray-700 shadow-sm"
-                                placeholder="Write your message here..."
+                                placeholder="Dear $(User Name),&#10;Any Massage! ..."
                                 value={messageBody}
                                 onChange={e => setMessageBody(e.target.value)}
                                 required
@@ -655,17 +752,47 @@ const WhatsappSendMessage: React.FC = () => {
                                 title="Add New Contact">+</button>
                         </div>
 
-                        {/* File Upload */}
-                        <div className="space-y-1">
-                            <label className="block font-bold text-gray-700 text-sm">📎 Attach File (optional — Images, Video, PDF, Excel, Word, ZIP…)</label>
+                        {/* File Upload — Multiple */}
+                        <div className="space-y-2">
+                            <label className="block font-bold text-gray-700 text-sm">📎 Attach Files (optional — Images, Video, PDF, Excel, Word, ZIP…)</label>
                             <div className="flex items-center gap-4 p-4 border-2 border-dashed border-green-100 rounded-xl bg-green-50/40 cursor-pointer hover:border-green-300 transition-all"
                                 onClick={() => fileInputRef.current?.click()}>
-                                <span className="bg-green-500 text-white font-bold py-2 px-4 rounded-lg text-sm shadow">Choose File</span>
-                                <span className="text-gray-500 text-sm truncate">{fileName}</span>
+                                <span className="bg-green-500 text-white font-bold py-2 px-4 rounded-lg text-sm shadow">Choose Files</span>
+                                <span className="text-gray-500 text-sm">{fileNames.length === 0 ? 'No Files Selected' : `${fileNames.length} file(s) selected`}</span>
                                 <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange}
-                                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt" />
+                                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.zip,.txt" multiple />
                             </div>
-                            <p className="text-xs text-gray-400">Max 5 MB. Images/Videos sent as media; other files sent as message text.</p>
+
+                            {/* Selected Files List */}
+                            {fileNames.length > 0 && (
+                                <div className="space-y-1.5 p-3 bg-green-50 rounded-xl border border-green-100">
+                                    <p className="text-xs font-bold text-green-700 uppercase tracking-wider">📁 Selected Files:</p>
+                                    {fileNames.map((name, idx) => (
+                                        <div key={idx} className="flex items-center justify-between gap-2 bg-white px-3 py-2 rounded-lg border border-green-50 shadow-sm">
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <span className="text-green-500 text-sm flex-shrink-0">
+                                                    {name.match(/\.(jpg|jpeg|png|gif|webp|svg)$/i) ? '🖼️' :
+                                                        name.match(/\.(mp4|mov|avi|mkv)$/i) ? '🎬' :
+                                                            name.match(/\.(mp3|wav|ogg)$/i) ? '🎵' :
+                                                                name.match(/\.(pdf)$/i) ? '📄' :
+                                                                    name.match(/\.(xls|xlsx|csv)$/i) ? '📊' :
+                                                                        name.match(/\.(doc|docx)$/i) ? '📝' :
+                                                                            name.match(/\.(zip|rar|7z)$/i) ? '📦' : '📎'}
+                                                </span>
+                                                <span className="text-sm text-gray-700 font-medium truncate">{name}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={(e) => { e.stopPropagation(); handleRemoveFile(idx); }}
+                                                className="flex-shrink-0 w-6 h-6 bg-red-100 hover:bg-red-200 text-red-500 rounded-full flex items-center justify-center text-xs font-bold transition-colors"
+                                                title="Remove file"
+                                            >✕</button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            <p className="text-xs text-gray-400">Max 5 MB per file. Select multiple files — each will be sent as a separate message to receiver.</p>
                         </div>
 
                         {/* Submit */}

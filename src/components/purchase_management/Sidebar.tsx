@@ -36,9 +36,11 @@ const hasPageAccess = (page: string, label: string): boolean => {
   }
 };
 
-// Route mapping for NavLink paths
 const PAGE_ROUTES: Record<string, string> = {
   'dashboard': '/purchase_management',
+  'ims-dashboard': '/purchase_management/ims-dashboard',
+  'index-sheet': '/purchase_management/index-sheet',
+  'daily-entry': '/purchase_management/daily-entry',
   'indent': '/purchase_management/indent',
   'approval': '/purchase_management/approval',
   'purchase-order': '/purchase_management/purchase-order',
@@ -55,6 +57,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const allMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'ims-dashboard', label: 'IMS Dashboard', icon: LayoutDashboard },
+    { id: 'index-sheet', label: 'Index Sheet', icon: FileText },
+    { id: 'daily-entry', label: 'Daily Entry', icon: Package },
     { id: 'indent', label: 'Indent', icon: FileText },
     { id: 'approval', label: 'Approval', icon: CheckCircle },
     { id: 'purchase-order', label: 'Generate & Send PO', icon: Send },

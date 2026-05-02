@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react"
 import { fetchUserDetailsApi, patchSystemAccessApi, updateUserDataApi } from "../redux/api/settingApi";
 import { fetchSystemsApi } from "../redux/api/systemsApi";
 import { fetchAttendanceSummaryApi } from "../redux/api/attendenceApi";
-import { Award, Target, ListTodo, Clock, CheckCircle2, Search, Filter, Download, ChevronDown, X, User, Activity, Timer, Upload, Camera } from "lucide-react";
+import { Award, Target, ListTodo, Clock, CheckCircle2, Search, Filter, Download, ChevronDown, X, User, Users, Activity, Timer, Upload, Camera } from "lucide-react";
 import searchIcon from "../assets/search-icon-logo.png";
 import { SCRIPT_URLS, DEVICE_LOGS_BASE_URL } from '../utils/envConfig';
 import toast from 'react-hot-toast';
@@ -50,6 +50,7 @@ const HomePage = () => {
     const [loadingBiometric, setLoadingBiometric] = useState(false);
     const [selectedDevice, setSelectedDevice] = useState(DEVICES[0]);
     const [biometricStats, setBiometricStats] = useState(null);
+    const [todaySummary, setTodaySummary] = useState({ present: 0, absent: 0, total: 0 });
 
     // Admin Avatar Upload State
     const [adminPhotoUrl, setAdminPhotoUrl] = useState('');
@@ -555,9 +556,10 @@ const HomePage = () => {
         }
     };
 
-    const fetchBiometricAttendance = async () => {
+    const fetchBiometricAttendance = async (usersList = null) => {
         setLoadingBiometric(true);
         try {
+            const currentUsers = usersList || allUsers;
             const now = new Date();
             const selectedMonth = now.getMonth() + 1;
             const selectedYear = now.getFullYear();
@@ -713,6 +715,29 @@ const HomePage = () => {
                 return (nUserCode && nCode === nUserCode) || (currentUserName && nName === currentUserName);
             });
             setBiometricStats(me || null);
+
+            // 5. Calculate Today's Global Health (Employee Attendance)
+            const todayStr = new Date().toISOString().split('T')[0];
+            const presentTodayCodes = new Set(
+                Object.values(dailyGrouped)
+                    .filter(d => d.date === todayStr)
+                    .map(d => d.id)
+            );
+            
+            // Get total active employees (excluding admins)
+            const activeEmployees = currentUsers.filter(u => 
+                u.status?.toLowerCase() === 'active' && 
+                u.role?.toLowerCase() !== 'admin'
+            );
+            const totalActive = activeEmployees.length || 0;
+            const presentCount = presentTodayCodes.size;
+            const absentCount = Math.max(0, totalActive - presentCount);
+
+            setTodaySummary({
+                present: presentCount,
+                absent: absentCount,
+                total: totalActive
+            });
 
         } catch (error) {
             console.error("Biometric fetch error:", error);
@@ -971,7 +996,7 @@ const HomePage = () => {
                 fetchTodaysTasks(matchedUser || { department: localStorage.getItem("role") === "admin" ? "Admin" : "Department N/A" });
 
                 // Fetch Biometric Attendance
-                fetchBiometricAttendance();
+                fetchBiometricAttendance(users);
             } catch (error) {
                 console.error("Error fetching employee details:", error);
                 setAllUsers(DUMMY_USERS);
@@ -1246,17 +1271,15 @@ const HomePage = () => {
                                     <div className="z-10">
                                         <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
                                             <Activity className="text-blue-500" size={20} />
-                                            Attendance Health
+                                            Attendance Health (Employee Attendance)
                                         </h3>
                                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">
-                                            {search
-                                                ? `Viewing: ${biometricAttendance.find(d => d.employeeName.toLowerCase().includes(search.toLowerCase()) || d.employeeCode.toString().includes(search))?.employeeName || 'No Match'}`
-                                                : `Showing: ${biometricStats?.employeeName || 'My Records'}`}
+                                            {isAdmin ? "Global Employee Status (Today)" : `Showing: ${biometricStats?.employeeName || 'My Records'}`}
                                         </p>
                                     </div>
-                                    {!loadingBiometric && biometricStats && (
+                                    {!loadingBiometric && (
                                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-3 py-1 rounded-full border border-gray-100">
-                                            {biometricStats.month} {biometricStats.year}
+                                            {isAdmin ? "TODAY" : `${biometricStats?.month || ''} ${biometricStats?.year || ''}`}
                                         </span>
                                     )}
                                 </div>
@@ -1265,6 +1288,65 @@ const HomePage = () => {
                                     <div className="flex flex-col items-center justify-center py-10 gap-3">
                                         <div className="w-12 h-12 border-4 border-blue-100 border-t-blue-600 rounded-full animate-spin"></div>
                                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest animate-pulse">Analyzing logs...</p>
+                                    </div>
+                                ) : (isAdmin ? (
+                                    <div className="z-10 w-full space-y-8">
+                                        {/* Top Section: Global Percentage */}
+                                        <div className="flex flex-col items-center justify-center">
+                                            <div className="relative w-32 h-32 mb-4">
+                                                <svg className="w-full h-full rotate-[-90deg]">
+                                                    <circle cx="64" cy="64" r="56" stroke="#f1f5f9" strokeWidth="10" fill="none" />
+                                                    <circle
+                                                        cx="64"
+                                                        cy="64"
+                                                        r="56"
+                                                        stroke={((todaySummary.present / (todaySummary.total || 1)) * 100) > 80 ? '#10b981' : '#f59e0b'}
+                                                        strokeWidth="10"
+                                                        fill="none"
+                                                        strokeDasharray="351.8"
+                                                        strokeDashoffset={351.8 - (351.8 * (todaySummary.present / (todaySummary.total || 1)))}
+                                                        strokeLinecap="round"
+                                                        className="transition-all duration-1000 ease-out"
+                                                    />
+                                                </svg>
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                                    <span className="text-3xl font-black text-gray-800">
+                                                        {todaySummary.total > 0 ? ((todaySummary.present / todaySummary.total) * 100).toFixed(0) : 0}%
+                                                    </span>
+                                                    <span className="text-[8px] font-bold text-gray-400 uppercase tracking-widest">Active Present</span>
+                                                </div>
+                                            </div>
+                                            <p className="text-xs font-bold text-gray-500">Total Active Employees: {todaySummary.total}</p>
+                                        </div>
+
+                                        {/* Mid Section: Status Cards */}
+                                        <div className="grid grid-cols-2 gap-4">
+                                            <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100 flex flex-col items-center shadow-sm">
+                                                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-emerald-600 mb-2 shadow-sm">
+                                                    <CheckCircle2 size={16} />
+                                                </div>
+                                                <p className="text-[9px] font-black text-emerald-600 uppercase tracking-widest mb-1">Present Today</p>
+                                                <p className="text-2xl font-black text-emerald-700">{todaySummary.present}</p>
+                                            </div>
+                                            <div className="bg-rose-50 rounded-2xl p-4 border border-rose-100 flex flex-col items-center shadow-sm">
+                                                <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-rose-600 mb-2 shadow-sm">
+                                                    <X size={16} />
+                                                </div>
+                                                <p className="text-[9px] font-black text-rose-600 uppercase tracking-widest mb-1">Absent Today</p>
+                                                <p className="text-2xl font-black text-rose-700">{todaySummary.absent}</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Bottom Section: Details */}
+                                        <div className="grid grid-cols-1 gap-3">
+                                            <div className="flex items-center justify-between px-5 py-3 bg-blue-50/50 rounded-2xl border border-blue-100">
+                                                <div className="flex items-center gap-3">
+                                                    <Users size={18} className="text-blue-500" />
+                                                    <span className="text-xs font-bold text-gray-600">Total Workforce</span>
+                                                </div>
+                                                <span className="text-base font-black text-blue-600">{todaySummary.total}</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 ) : (search ? (biometricAttendance.find(d => d.employeeName.toLowerCase().includes(search.toLowerCase()) || d.employeeCode.toString().includes(search))) : biometricStats) ? (
                                     (() => {
@@ -1353,7 +1435,7 @@ const HomePage = () => {
                                             </p>
                                         )}
                                     </div>
-                                )}
+                                ))}
                             </div>
 
                         </div>
@@ -1451,77 +1533,122 @@ const HomePage = () => {
                         {/* Progress Section */}
                         <div className="bg-white rounded-3xl shadow-xl border border-gray-100 p-10 hover:shadow-2xl transition-all">
                             <h3 className="text-xl font-bold text-gray-800 mb-8">Overall Progress</h3>
-                            <div className="flex flex-col md:flex-row items-center justify-center gap-16">
-                                {/* CIRCLE */}
-                                <div className="relative w-48 h-48">
-                                    <svg className="w-full h-full rotate-[-90deg]">
-                                        <circle cx="96" cy="96" r="80" stroke="#f1f5f9" strokeWidth="16" fill="none" />
-                                        <circle
-                                            cx="96"
-                                            cy="96"
-                                            r="80"
-                                            stroke="#10b981"
-                                            strokeWidth="16"
-                                            fill="none"
-                                            strokeDasharray="502"
-                                            strokeDashoffset="75"
-                                            strokeLinecap="round"
-                                        />
-                                        <circle
-                                            cx="96"
-                                            cy="96"
-                                            r="80"
-                                            stroke="#f59e0b"
-                                            strokeWidth="16"
-                                            fill="none"
-                                            strokeDasharray="502"
-                                            strokeDashoffset="420"
-                                            strokeLinecap="round"
-                                        />
-                                    </svg>
-                                    <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                        <span className="text-5xl font-black text-blue-700">
-                                            {taskStats.total > 0 ? ((taskStats.completed / taskStats.total) * 100).toFixed(1) : "0.0"}%
-                                        </span>
-                                        <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Overall</span>
-                                    </div>
-                                </div>
+                                {(() => {
+                                    const total = taskStats.total || 0;
+                                    const completed = taskStats.completed || 0;
+                                    const pending = taskStats.pending || 0;
+                                    const overdue = taskStats.overdue || 0;
+                                    const notDone = pending + overdue;
 
-                                {/* LEGEND */}
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-6 w-full md:w-auto">
-                                    <div className="flex items-center gap-3">
-                                        <span className="w-4 h-4 rounded-full bg-green-500 shadow-sm shadow-green-200"></span>
-                                        <span className="font-bold text-gray-700">Completed:</span>
-                                        <span className="text-gray-500 font-medium ml-auto">
-                                            {taskStats.total > 0 ? ((taskStats.completed / taskStats.total) * 100).toFixed(1) : "0.0"}%
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="w-4 h-4 rounded-full bg-orange-500 shadow-sm shadow-orange-200"></span>
-                                        <span className="font-bold text-gray-700">Pending:</span>
-                                        <span className="text-gray-500 font-medium ml-auto">
-                                            {taskStats.total > 0 ? ((taskStats.pending / taskStats.total) * 100).toFixed(1) : "0.0"}%
-                                        </span>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="w-4 h-4 rounded-full bg-gray-300 shadow-sm"></span>
-                                        <span className="font-bold text-gray-700">Not Done:</span>
-                                        <span className="text-gray-500 font-medium ml-auto">0.0%</span>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <span className="w-4 h-4 rounded-full bg-red-500 shadow-sm shadow-red-200"></span>
-                                        <span className="font-bold text-gray-700">Overdue:</span>
-                                        <span className="text-gray-500 font-medium ml-auto">
-                                            {taskStats.total > 0 ? ((taskStats.overdue / taskStats.total) * 100).toFixed(1) : "0.0"}%
-                                        </span>
-                                    </div>
-                                </div>
+                                    const completedPct = total > 0 ? (completed / total) * 100 : 0;
+                                    const pendingPct = total > 0 ? (pending / total) * 100 : 0;
+                                    const overduePct = total > 0 ? (overdue / total) * 100 : 0;
+                                    const notDonePct = total > 0 ? (notDone / total) * 100 : 0;
+
+                                    // SVG Circle properties
+                                    const radius = 70; // Adjusted for better fit
+                                    const strokeWidth = 14;
+                                    const circumference = 2 * Math.PI * radius;
+                                    
+                                    // Start offset to align with image (starting from top)
+                                    // We'll stack them: Green (Completed), then Orange (Pending)
+                                    const completedOffset = circumference - (circumference * completedPct / 100);
+                                    const pendingOffset = circumference - (circumference * pendingPct / 100);
+                                    
+                                    // Rotation for stacking (optional, but let's keep it simple as per image layers)
+
+                                    return (
+                                        <div className="flex flex-col md:flex-row items-center justify-center gap-12 mt-4">
+                                            {/* CIRCLE CHART */}
+                                            <div className="relative w-48 h-48 flex items-center justify-center">
+                                                <svg className="w-full h-full rotate-[-90deg]">
+                                                    {/* Background Grey Circle */}
+                                                    <circle 
+                                                        cx="96" cy="96" r={radius} 
+                                                        stroke="#f1f5f9" strokeWidth={strokeWidth} fill="none" 
+                                                    />
+                                                    
+                                                    {/* Green Segment (Completed) */}
+                                                    <circle
+                                                        cx="96" cy="96" r={radius}
+                                                        stroke="#10b981"
+                                                        strokeWidth={strokeWidth}
+                                                        fill="none"
+                                                        strokeDasharray={circumference}
+                                                        strokeDashoffset={completedOffset}
+                                                        strokeLinecap="round"
+                                                        className="transition-all duration-1000 ease-out"
+                                                    />
+                                                    
+                                                    {/* Orange Segment (Pending) */}
+                                                    {/* To make it appear after Green, we could rotate or just overlay. 
+                                                        The image shows them as separate distinct arcs. 
+                                                        I'll use rotation to place Pending right after Completed. */}
+                                                    <circle
+                                                        cx="96" cy="96" r={radius}
+                                                        stroke="#f59e0b"
+                                                        strokeWidth={strokeWidth}
+                                                        fill="none"
+                                                        strokeDasharray={circumference}
+                                                        strokeDashoffset={pendingOffset}
+                                                        strokeLinecap="round"
+                                                        style={{ transform: `rotate(${completedPct * 3.6}deg)`, transformOrigin: 'center' }}
+                                                        className="transition-all duration-1000 ease-out"
+                                                    />
+                                                </svg>
+                                                
+                                                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                                                    <span className="text-4xl font-black text-blue-600 leading-none">
+                                                        {completedPct.toFixed(1)}%
+                                                    </span>
+                                                    <span className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mt-1">
+                                                        OVERALL
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            {/* LEGEND - 2x2 Grid */}
+                                            <div className="grid grid-cols-2 gap-x-10 gap-y-6">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-3.5 h-3.5 rounded-full bg-[#10b981]"></div>
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-sm font-bold text-gray-700">Completed:</span>
+                                                        <span className="text-sm font-bold text-gray-400">{completedPct.toFixed(1)}%</span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-3.5 h-3.5 rounded-full bg-[#f59e0b]"></div>
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-sm font-bold text-gray-700">Pending:</span>
+                                                        <span className="text-sm font-bold text-gray-400">{pendingPct.toFixed(1)}%</span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-3.5 h-3.5 rounded-full bg-[#cbd5e1]"></div>
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-sm font-bold text-gray-700">Not Done:</span>
+                                                        <span className="text-sm font-bold text-gray-400">{notDonePct.toFixed(1)}%</span>
+                                                    </div>
+                                                </div>
+                                                
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-3.5 h-3.5 rounded-full bg-[#ef4444]"></div>
+                                                    <div className="flex items-baseline gap-2">
+                                                        <span className="text-sm font-bold text-gray-700">Overdue:</span>
+                                                        <span className="text-sm font-bold text-gray-400">{overduePct.toFixed(1)}%</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     </div>
-                </div>
-            </section>
-        </div>
+                </section>
+            </div>
     )
 }
 export default HomePage;

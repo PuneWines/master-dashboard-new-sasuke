@@ -40,8 +40,10 @@ interface POIndentItem {
   reorderQuantityPcs: number;
   approved: string;
   traderName: string;
+  partyName: string;
   sizeML: number;
   bottlesPerCase: number;
+  perDayAvgBoxSale: number;
   reorderQuantityBox: number;
   shopName: string;
   orderBy: string;
@@ -58,6 +60,8 @@ interface POIndentItem {
   actualTimestamp1?: string;
   actualTimestamp2?: string;
   actualTimestamp3?: string;
+  traderPhone?: string;
+  transporterPhone?: string;
   _rowIndex?: number;
 }
 
@@ -133,6 +137,12 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
 
   const [tradeName, setTradeName] = useState(indent.traderName || "");
 
+  useEffect(() => {
+    if (indent.traderName) {
+      setTradeName(indent.traderName);
+    }
+  }, [indent]);
+
 
   const [transporterNames, setTransporterNames] = useState<string[]>([
     "wait loading",
@@ -145,9 +155,9 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
       try {
         const transporters = await indentService.getTransporterNames();
         setTransporterNames(transporters);
-        console.log("Fetched transporterNames:", transporters);
+        console.log("Fetched transporters:", transporters);
       } catch (error) {
-        console.error("Error fetching master data:", error);
+        console.error("Error fetching transporters:", error);
       }
     };
     fetchMaster();
@@ -245,62 +255,42 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
                 <table className="overflow-x-auto w-full bg-pink-100 border border-gray-300 border-collapse">
                   <thead className="sticky top-0 z-10 bg-gray-100">
                     <tr>
-                      <th className="px-4 py-2 text-left border border-gray-300">
-                        S.NO
-                      </th>
-                      <th className="px-4 py-2 text-left border border-gray-300">
-                        ITEM NAME
-                      </th>
-                      <th className="px-4 py-2 text-left border border-gray-300">
-                        SHOP NAME
-                      </th>
-                      <th className="px-4 py-2 text-left border border-gray-300">
-                        Quantity (Pcs)
-                      </th>
-                      <th className="px-4 py-2 text-left border border-gray-300">
-                        QTY (BOX)
-                      </th>
-                      <th className="px-4 py-2 text-left border border-gray-300">
-                        SIZE (ML)
-                      </th>
-                      <th className="px-4 py-2 text-left border border-gray-300">
-                        Delete
-                      </th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">INDENT NUMBER</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">SHOP NAME</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">PARTY NAME</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">ITEM NAME</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">BOX_CLOSING_QTY</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">MlS</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">B/CS</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">PER_DAY_AVG_BOX_SALE</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">ORDER BOX</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">ORDER QTY</th>
+                      <th className="px-2 py-2 text-left border border-gray-300 text-xs font-bold uppercase">Delete</th>
                     </tr>
                   </thead>
                   <tbody>
                     {finalVisibleIndents.map((i, index) => (
                       <tr
-                        key={`${i.indentNumber}-${i.traderName}-${i.shopName}-${index}`}
-                        className="hover:bg-gray-50"
+                        key={`${i.indentNumber}-${i.traderName || i.partyName}-${i.shopName}-${index}`}
+                        className="hover:bg-gray-50 text-sm"
                       >
-                        <td className="px-4 py-2 border border-gray-300">
-                          {i.indentNumber}
-                        </td>
-                        <td className="px-4 py-2 border border-gray-300">
-                          {i.itemName}
-                        </td>
-                        <td className="px-4 py-2 border border-gray-300">
+                        <td className="px-2 py-2 border border-gray-300 whitespace-nowrap">{i.indentNumber}</td>
+                        <td className="px-2 py-2 border border-gray-300">
                           <input
                             type="text"
                             value={i.shopName}
-                            onChange={(e) =>
-                              updateShopName(i.id, e.target.value)
-                            }
-                            className="px-2 py-1 w-full rounded border border-gray-300"
+                            onChange={(e) => updateShopName(i.id, e.target.value)}
+                            className="px-1 py-1 w-full text-xs rounded border border-gray-300"
                           />
                         </td>
-                        <td className="px-4 py-2 border border-gray-300">
-                          {i.bottlesPerCase && i.reorderQuantityBox
-                            ? Math.round(i.bottlesPerCase * i.reorderQuantityBox)
-                            : formatNumber(i.reorderQuantityPcs)}
-                        </td>
-                        <td className="px-4 py-2 border border-gray-300">
-                          {formatNumber(i.reorderQuantityBox)}
-                        </td>
-                        <td className="px-4 py-2 border border-gray-300">
-                          {formatNumber(i.sizeML)}
-                        </td>
+                        <td className="px-2 py-2 border border-gray-300 whitespace-nowrap">{i.partyName || i.traderName}</td>
+                        <td className="px-2 py-2 border border-gray-300 min-w-[150px]">{i.itemName}</td>
+                        <td className="px-2 py-2 border border-gray-300 text-center">{formatNumber(i.closingStock)}</td>
+                        <td className="px-2 py-2 border border-gray-300 text-center">{formatNumber(i.sizeML)}</td>
+                        <td className="px-2 py-2 border border-gray-300 text-center">{formatNumber(i.bottlesPerCase)}</td>
+                        <td className="px-2 py-2 border border-gray-300 text-center">{formatNumber(i.perDayAvgBoxSale)}</td>
+                        <td className="px-2 py-2 border border-gray-300 text-center">{formatNumber(i.reorderQuantityBox)}</td>
+                        <td className="px-2 py-2 border border-gray-300 text-center">{formatNumber(i.reorderQuantityPcs)}</td>
                         <td className="px-4 py-2 border border-gray-300">
                           <button
                             onClick={() =>
@@ -523,26 +513,49 @@ const TableRow: React.FC<TableRowProps> = ({
       </td>
     )}
     {columnVisibility.remarks && (
-      <td className="px-6 py-4 min-w-[200px]">{indent.remarks || "-"}</td>
+      <td className="px-6 py-4 min-w-[200px]">
+        {activeTab === "history" 
+          ? (indent.remarksFrontend || indent.remarks || "-") 
+          : (indent.remarks || "-")}
+      </td>
     )}
   </tr>
 );
 
 export const PurchaseOrderPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending");
+  const [searchTerm, setSearchTerm] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  const [selectedIndent, setSelectedIndent] = useState<POIndentItem | null>(
-    null
-  );
+  const [selectedIndent, setSelectedIndent] = useState<POIndentItem | null>(null);
   const [indents, setIndents] = useState<POIndentItem[]>([]);
+  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [processedIndentNumbers, setProcessedIndentNumbers] = useState<Set<string>>(new Set());
+  
+  // WhatsApp Workflow States
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [generatedWorkflowLinks, setGeneratedWorkflowLinks] = useState<{
+    poNumber: string;
+    traderLink: string;
+    transporterLink: string;
+    traderMsg: string;
+    transporterMsg: string;
+    traderPhone: string;
+    transporterPhone: string;
+  } | null>(null);
+  
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState<{trader: boolean, transporter: boolean}>({
+    trader: false,
+    transporter: false
+  });
+  const [whatsAppStatus, setWhatsAppStatus] = useState<{trader: string | null, transporter: string | null}>({
+    trader: null,
+    transporter: null
+  });
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>("");
-  const [searchTerm, setSearchTerm] = useState("");
   const [columnVisibility] = useState<ColumnVisibility>({
     action: true,
     indentNumber: true,
@@ -684,11 +697,11 @@ export const PurchaseOrderPage: React.FC = () => {
         tradeName,
         transporterName: transporterName.trim(),
         items: items.map((i: POIndentItem) => ({
-          indentNumber: i.indentNumber,
-          itemName: i.itemName,
-          reorderQuantityPcs: i.reorderQuantityPcs.toString(),
-          reorderQuantityBox: i.reorderQuantityBox?.toString() || "0",
-          sizeML: i.sizeML.toString(),
+          indentNumber: i.indentNumber || "",
+          itemName: i.itemName || "",
+          reorderQuantityPcs: (i.reorderQuantityPcs || 0).toString(),
+          reorderQuantityBox: (i.reorderQuantityBox || 0).toString(),
+          sizeML: (i.sizeML || 0).toString(),
         })),
         remarks: remarks.trim() || "Generated via system",
       };
@@ -719,9 +732,11 @@ export const PurchaseOrderPage: React.FC = () => {
           actualTimestamp3: currentDate,
           poCopyLink: poCopyLink,
           remarksFrontend: remarks.trim() || "",
+          remarks: remarks.trim() || item.remarks || "",
           poQty: item.reorderQuantityPcs,
           isPO: true,
           shopName: item.shopName,
+          plannedAE: currentDate, // Set so item appears in Get Lifting pending tab
         };
 
         try {
@@ -757,8 +772,42 @@ export const PurchaseOrderPage: React.FC = () => {
 
       setShowModal(false);
       setSelectedIndent(null);
+      
+      // Generate Secure Workflow Links
+      const appUrl = window.location.origin;
+      const secureToken = btoa(`${poNumberForSubmit}-${Date.now()}`); // Mock secure token
+      
+      const traderLink = `${appUrl}/public/trader-form?poId=${poNumberForSubmit}&token=${secureToken}`;
+      const transporterLink = `${appUrl}/public/transporter-form?poId=${poNumberForSubmit}&token=${secureToken}`;
+      
+      const traderMsg = `*Purchase Order: ${poNumberForSubmit}*\nHi, please confirm acceptance of the new order. Click the secure link below to view details and confirm:\n${traderLink}`;
+      const transporterMsg = `*Pickup Assignment: ${poNumberForSubmit}*\nHi, a new order is ready for pickup. Click the secure link below to view details and update pickup status:\n${transporterLink}`;
+      
+      // Attempt to find phone numbers from the first matched indent (if available in future mapping)
+      const mockTraderPhone = selectedIndent?.traderPhone || ""; 
+      const mockTransporterPhone = selectedIndent?.transporterPhone || "";
+
+      setGeneratedWorkflowLinks({
+        poNumber: poNumberForSubmit,
+        traderLink,
+        transporterLink,
+        traderMsg,
+        transporterMsg,
+        traderPhone: mockTraderPhone,
+        transporterPhone: mockTransporterPhone
+      });
+      
+      // Reset sending status
+      setWhatsAppStatus({ trader: null, transporter: null });
+      setIsSendingWhatsApp({ trader: false, transporter: false });
+
+      
       setShowSuccessAnimation(true);
-      setActiveTab("history");
+      setTimeout(() => {
+        setShowSuccessAnimation(false);
+        setShowWhatsAppModal(true); // Show WhatsApp sharing modal after animation
+        setActiveTab("history");
+      }, 2500);
 
     } catch (error) {
       console.error("Error in PO submission:", error);
@@ -972,6 +1021,130 @@ export const PurchaseOrderPage: React.FC = () => {
         message="PO Generated Successfully!"
         onComplete={() => setShowSuccessAnimation(false)}
       />
+
+      {/* WhatsApp Workflow Modal */}
+      {showWhatsAppModal && generatedWorkflowLinks && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-6 border-b border-gray-200 bg-green-50">
+              <h3 className="text-xl font-bold text-green-800">PO Generated Successfully!</h3>
+              <p className="text-sm text-green-600 mt-1">PO Number: {generatedWorkflowLinks.poNumber}</p>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <p className="text-sm text-gray-600">
+                Automated workflow links have been generated. Send them via WhatsApp to trigger the confirmation process.
+              </p>
+              
+              <div className="space-y-4">
+                {/* Trader Section */}
+                <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                  <h4 className="font-semibold text-gray-900 mb-2">1. Trader Confirmation</h4>
+                  <div className="flex flex-col gap-2 mb-3">
+                    <input 
+                      type="text" 
+                      placeholder="Trader WhatsApp Number (e.g. 919876543210)" 
+                      value={generatedWorkflowLinks.traderPhone}
+                      onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? {...prev, traderPhone: e.target.value} : null)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 outline-none text-sm"
+                    />
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if (!generatedWorkflowLinks.traderPhone) return alert("Please enter Trader Phone Number");
+                      setIsSendingWhatsApp(prev => ({...prev, trader: true}));
+                      try {
+                        const res = await fetch(`https://api.maytapi.com/api/654f0c29-bfe7-42f2-b5a9-81638a716206/102579/sendMessage`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'x-maytapi-key': '9fcce0ed-0e27-423f-946f-14141bc6589a'
+                          },
+                          body: JSON.stringify({
+                            to_number: generatedWorkflowLinks.traderPhone,
+                            type: 'text',
+                            message: generatedWorkflowLinks.traderMsg
+                          })
+                        });
+                        if (res.ok) {
+                          setWhatsAppStatus(prev => ({...prev, trader: 'Success'}));
+                        } else {
+                          setWhatsAppStatus(prev => ({...prev, trader: 'Failed'}));
+                        }
+                      } catch (err) {
+                        setWhatsAppStatus(prev => ({...prev, trader: 'Error'}));
+                      }
+                      setIsSendingWhatsApp(prev => ({...prev, trader: false}));
+                    }}
+                    disabled={isSendingWhatsApp.trader || whatsAppStatus.trader === 'Success'}
+                    className="flex items-center justify-center gap-2 w-full py-2 bg-green-500 text-white rounded font-medium hover:bg-green-600 transition-colors disabled:opacity-50"
+                  >
+                    {isSendingWhatsApp.trader ? "Sending via API..." : whatsAppStatus.trader === 'Success' ? "Sent Successfully ✓" : "Send via Maytapi API"}
+                  </button>
+                  {whatsAppStatus.trader === 'Failed' && <p className="text-red-500 text-xs mt-1">Failed to send message. Please check number.</p>}
+                </div>
+                
+                {/* Transporter Section */}
+                <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
+                  <h4 className="font-semibold text-gray-900 mb-2">2. Transporter Pickup</h4>
+                  <div className="flex flex-col gap-2 mb-3">
+                    <input 
+                      type="text" 
+                      placeholder="Transporter WhatsApp Number (e.g. 919876543210)" 
+                      value={generatedWorkflowLinks.transporterPhone}
+                      onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? {...prev, transporterPhone: e.target.value} : null)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 outline-none text-sm"
+                    />
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      if (!generatedWorkflowLinks.transporterPhone) return alert("Please enter Transporter Phone Number");
+                      setIsSendingWhatsApp(prev => ({...prev, transporter: true}));
+                      try {
+                        const res = await fetch(`https://api.maytapi.com/api/654f0c29-bfe7-42f2-b5a9-81638a716206/102579/sendMessage`, {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'x-maytapi-key': '9fcce0ed-0e27-423f-946f-14141bc6589a'
+                          },
+                          body: JSON.stringify({
+                            to_number: generatedWorkflowLinks.transporterPhone,
+                            type: 'text',
+                            message: generatedWorkflowLinks.transporterMsg
+                          })
+                        });
+                        if (res.ok) {
+                          setWhatsAppStatus(prev => ({...prev, transporter: 'Success'}));
+                        } else {
+                          setWhatsAppStatus(prev => ({...prev, transporter: 'Failed'}));
+                        }
+                      } catch (err) {
+                        setWhatsAppStatus(prev => ({...prev, transporter: 'Error'}));
+                      }
+                      setIsSendingWhatsApp(prev => ({...prev, transporter: false}));
+                    }}
+                    disabled={isSendingWhatsApp.transporter || whatsAppStatus.transporter === 'Success'}
+                    className="flex items-center justify-center gap-2 w-full py-2 bg-green-500 text-white rounded font-medium hover:bg-green-600 transition-colors disabled:opacity-50"
+                  >
+                    {isSendingWhatsApp.transporter ? "Sending via API..." : whatsAppStatus.transporter === 'Success' ? "Sent Successfully ✓" : "Send via Maytapi API"}
+                  </button>
+                  {whatsAppStatus.transporter === 'Failed' && <p className="text-red-500 text-xs mt-1">Failed to send message. Please check number.</p>}
+                </div>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end">
+              <button
+                onClick={() => setShowWhatsAppModal(false)}
+                className="px-6 py-2 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

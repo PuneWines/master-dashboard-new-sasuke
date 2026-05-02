@@ -22,6 +22,9 @@ async function testLoginData() {
       const headers = result.data[0];
       const rows = result.data.slice(1);
       
+      const userIdIdx = headers.findIndex(h => h && h.toString().toLowerCase().includes("user id"));
+      const passwordIdx = headers.findIndex(h => h && h.toString().toLowerCase().includes("password"));
+      
       // Look for any row that might be ANGAD or SAGAR, case-insensitive
       const angad = rows.find(r => r.some(cell => cell && cell.toString().toUpperCase().includes("ANGAD")));
       const sagar = rows.find(r => r.some(cell => cell && cell.toString().toUpperCase().includes("SAGAR")));
