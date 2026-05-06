@@ -649,7 +649,11 @@ const HomePage = () => {
                 } catch (e) { console.warn(`Log fetch failed for ${selectedDevice.name}`); }
             }
 
-            if (allLogs.length === 0) throw new Error('No logs found');
+            if (allLogs.length === 0) {
+                setBiometricAttendance([]);
+                setBiometricStats(null);
+                return;
+            }
 
             // 3. Process Logs (filter by date >= 2026-04-01)
             const filteredLogs = allLogs.filter(log => log.LogDate.split(' ')[0] >= '2026-04-01');

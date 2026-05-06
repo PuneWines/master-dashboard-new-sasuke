@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Search, Download, Calendar, Loader2, CheckCircle, X, Clock, Pencil, CheckCircle2, XCircle, FileText } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { DEVICE_LOGS_BASE_URL } from '../../utils/envConfig';
+import { DEVICE_LOGS_BASE_URL, SCRIPT_URLS } from '../../utils/envConfig';
 
 const DEVICES = [
   { name: 'ALL DEVICES', serial: 'ALL', apiName: 'ALL' },
@@ -13,10 +13,10 @@ const DEVICES = [
 ];
 
 
-const JOINING_API_URL = 'https://script.google.com/macros/s/AKfycbyGp3onARkG7QfXKSZ22J6PokX-rYEYjOd-loijl7CqfnmDev_-aukiXp1vZ7yToJKQ/exec?sheet=JOINING&action=fetch';
-const HOLIDAY_API_URL = 'https://script.google.com/macros/s/AKfycbyGp3onARkG7QfXKSZ22J6PokX-rYEYjOd-loijl7CqfnmDev_-aukiXp1vZ7yToJKQ/exec?spreadsheetId=1GnzBl9yq2M5FXBeCNnPIVL5PFSTXi2T3SBBOCHAKqMs&sheet=Holiday%20List&action=fetch';
-const SYNC_URL = 'https://script.google.com/macros/s/AKfycbz009j6fH3ADRbVJYJGt2QnXu6si3isPR3CHvtv06W7DOEret6CEiJWc_PbDcKY5SSs/exec';
-const MASTER_MAP_URL = 'https://script.google.com/macros/s/AKfycbyGp3onARkG7QfXKSZ22J6PokX-rYEYjOd-loijl7CqfnmDev_-aukiXp1vZ7yToJKQ/exec?sheet=MASTER&action=fetch';
+const JOINING_API_URL = `${SCRIPT_URLS.HR_JOINING}?sheet=JOINING&action=fetch`;
+const HOLIDAY_API_URL = `${SCRIPT_URLS.HR_JOINING}?spreadsheetId=1GnzBl9yq2M5FXBeCNnPIVL5PFSTXi2T3SBBOCHAKqMs&sheet=Holiday%20List&action=fetch`;
+const SYNC_URL = `${SCRIPT_URLS.HR_ATTENDANCE_SYNC}`;
+const MASTER_MAP_URL = `${SCRIPT_URLS.HR_JOINING}?sheet=MASTER&action=fetch`;
 
 const Attendancedaily = () => {
   const todayDate = new Date().toISOString().split('T')[0];
@@ -383,8 +383,14 @@ const Attendancedaily = () => {
       }
 
       // 2. Fetch Device Logs
-      const queryStart = startDate || '2026-04-01';
-      const queryEnd = endDate || '2026-04-30';
+      let queryStart = startDate || '2026-04-01';
+      let queryEnd = endDate || '2026-04-30';
+
+      // Cap query dates to today to avoid 500 error from biometric API
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      if (queryEnd > todayStr) queryEnd = todayStr;
+      if (queryStart > todayStr) queryStart = todayStr;
 
       let rawLogs = [];
       if (selectedDevice.name === 'ALL DEVICES') {
@@ -408,7 +414,10 @@ const Attendancedaily = () => {
       } else {
         const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${queryStart}&ToDate=${queryEnd}`;
         const response = await fetch(API_URL);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        if (!response.ok) {
+          setAttendanceData([]);
+          return;
+        }
         const data = await response.json();
         rawLogs = Array.isArray(data) ? data.map(l => ({ ...l, _DeviceName: selectedDevice.name })) : [];
       }

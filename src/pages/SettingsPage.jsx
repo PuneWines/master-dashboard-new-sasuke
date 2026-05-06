@@ -55,7 +55,7 @@ const SettingsPage = () => {
       ],
       'Employee': ['My Profile', 'My Attendance', 'Leave Request', 'My Salary', 'Advance', 'Company Calendar']
     },
-    'Purchase App': ['Dashboard', 'Indent', 'Approval', 'Generate & Send PO', 'Get Lifting', 'Cross Check & Receive'],
+    'Purchase App': ['Dashboard', 'Indent', 'Approval', 'Generate & Send PO', 'Trader Verification', 'Transporter Verification', 'Get Lifting', 'Cross Check & Receive'],
     'Document Manager': ['Dashboard', 'Add Document', 'All Documents', 'Renewal', 'Shared', 'License']
   };
 

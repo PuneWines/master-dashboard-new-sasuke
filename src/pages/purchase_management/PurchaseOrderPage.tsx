@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Filter, X, Send, Eye, Truck } from "lucide-react";
 import { format } from "date-fns";
-import { indentService } from "../../services/purchase_management/indentService";
+import { indentService, VendorMasterEntry } from "../../services/purchase_management/indentService";
 import { storageUtils } from "../../utils/purchase_management/storage";
 import { generatePOPDF } from "../../utils/purchase_management/pdfGenerator";
 import { SuccessAnimation } from "./SuccessAnimation";
@@ -90,6 +90,7 @@ interface POGenerateModalProps {
   onClose: () => void;
   onConfirm: (
     transporterName: string,
+    receiverManager: string,
     remarks: string,
     items: POIndentItem[],
     companyName: string
@@ -148,16 +149,23 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
     "wait loading",
   ]);
   const [transporterName, setTransporterName] = useState("");
+  const [receiverManagers, setReceiverManagers] = useState<string[]>(["wait loading"]);
+  const [receiverManager, setReceiverManager] = useState("");
   const [remarks, setRemarks] = useState("");
 
   useEffect(() => {
     const fetchMaster = async () => {
       try {
-        const transporters = await indentService.getTransporterNames();
+        const [transporters, managers] = await Promise.all([
+          indentService.getTransporterNames(),
+          indentService.getReceiverManagers()
+        ]);
         setTransporterNames(transporters);
+        setReceiverManagers(managers);
         console.log("Fetched transporters:", transporters);
+        console.log("Fetched managers:", managers);
       } catch (error) {
-        console.error("Error fetching transporters:", error);
+        console.error("Error fetching master data:", error);
       }
     };
     fetchMaster();
@@ -333,6 +341,24 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
 
             <div className="mt-6">
               <label className="flex gap-2 items-center mb-2 text-sm font-medium text-gray-700">
+                Receiver Manager *
+              </label>
+              <select
+                value={receiverManager}
+                onChange={(e) => setReceiverManager(e.target.value)}
+                className="px-4 py-2 w-full rounded-lg border border-gray-300 focus:ring-2 focus:ring-green-500 focus:border-transparent"
+              >
+                <option value="">Select Receiver Manager</option>
+                {receiverManagers.map((name: string) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-6">
+              <label className="flex gap-2 items-center mb-2 text-sm font-medium text-gray-700">
                 Remarks1
               </label>
               <input
@@ -355,14 +381,15 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
                 onClick={() =>
                   onConfirm(
                     transporterName,
+                    receiverManager,
                     remarks,
                     finalVisibleIndents,
                     companyName
                   )
                 }
-                disabled={!transporterName.trim() || isSubmitting}
+                disabled={!transporterName.trim() || !receiverManager.trim() || isSubmitting}
                 className={`px-6 py-2 text-white rounded-lg transition-colors flex items-center gap-2 ${
-                  !transporterName.trim() || isSubmitting
+                  !transporterName.trim() || !receiverManager.trim() || isSubmitting
                     ? "bg-gray-400 cursor-not-allowed text-gray-700"
                     : "bg-green-600 hover:bg-green-700"
                 }`}
@@ -536,22 +563,28 @@ export const PurchaseOrderPage: React.FC = () => {
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
   const [generatedWorkflowLinks, setGeneratedWorkflowLinks] = useState<{
     poNumber: string;
+    poCopyLink: string;
     traderLink: string;
     transporterLink: string;
     traderMsg: string;
     transporterMsg: string;
+    receiverMsg: string;
     traderPhone: string;
     transporterPhone: string;
+    receiverPhone: string;
   } | null>(null);
   
-  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState<{trader: boolean, transporter: boolean}>({
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState<{trader: boolean, transporter: boolean, receiver: boolean}>({
     trader: false,
-    transporter: false
+    transporter: false,
+    receiver: false
   });
-  const [whatsAppStatus, setWhatsAppStatus] = useState<{trader: string | null, transporter: string | null}>({
+  const [whatsAppStatus, setWhatsAppStatus] = useState<{trader: string | null, transporter: string | null, receiver: string | null}>({
     trader: null,
-    transporter: null
+    transporter: null,
+    receiver: null
   });
+  const [vendorMasterData, setVendorMasterData] = useState<VendorMasterEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -597,9 +630,10 @@ export const PurchaseOrderPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const [data, poSet] = await Promise.all([
+        const [data, poSet, vendorMaster] = await Promise.all([
           indentService.getIndents(),
-          indentService.getProcessedPOIndentNumbers()
+          indentService.getProcessedPOIndentNumbers(),
+          indentService.getVendorMasterData(),
         ]);
         const userShopRaw = storageUtils.getCurrentUser()?.shopName || "";
         const allowedShops =
@@ -616,6 +650,7 @@ export const PurchaseOrderPage: React.FC = () => {
           : (data as POIndentItem[]);
         setIndents(filtered);
         setProcessedIndentNumbers(poSet);
+        setVendorMasterData(vendorMaster);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load indents");
       } finally {
@@ -675,6 +710,7 @@ export const PurchaseOrderPage: React.FC = () => {
 
   const handleSubmitPO = async (
     transporterName: string,
+    receiverManager: string,
     remarks: string,
     items: POIndentItem[],
     companyName: string
@@ -702,6 +738,10 @@ export const PurchaseOrderPage: React.FC = () => {
           reorderQuantityPcs: (i.reorderQuantityPcs || 0).toString(),
           reorderQuantityBox: (i.reorderQuantityBox || 0).toString(),
           sizeML: (i.sizeML || 0).toString(),
+          closingStockPcs: (i.closingStock || 0).toString(),
+          closingStockBox: (i.reorderQuantityBox
+            ? Math.round((i.closingStock || 0) / (i.bottlesPerCase || 1)).toString()
+            : "0"),
         })),
         remarks: remarks.trim() || "Generated via system",
       };
@@ -725,6 +765,7 @@ export const PurchaseOrderPage: React.FC = () => {
       const updatePromises = items.map(async (item) => {
         const itemUpdate = {
           transporterName: transporterName.trim(),
+          receiverManager: receiverManager.trim(),
           poNumber: poNumberForSubmit,
           poGeneratedAt: currentTime,
           actualTimestamp1: currentDate,
@@ -773,33 +814,77 @@ export const PurchaseOrderPage: React.FC = () => {
       setShowModal(false);
       setSelectedIndent(null);
       
+      // === Vendor Master Phone Lookup ===
+      const traderNameKey = selectedIndent.traderName || "";
+      const transporterNameKey = transporterName.trim();
+      
+      // Find matching entry by trader name
+      const vendorEntry = vendorMasterData.find(
+        (v) => v.traderName.toLowerCase() === traderNameKey.toLowerCase()
+      );
+      // Find transporter phone by transporter name match
+      const transporterEntry = vendorMasterData.find(
+        (v) => v.transporterName.toLowerCase() === transporterNameKey.toLowerCase()
+      );
+
+      const autoTraderPhone = vendorEntry?.traderPhone || selectedIndent?.traderPhone || "";
+      const autoTransporterPhone = transporterEntry?.transporterPhone || selectedIndent?.transporterPhone || "";
+      const autoReceiverPhone = vendorEntry?.receiverPhone || "";
+
       // Generate Secure Workflow Links
       const appUrl = window.location.origin;
-      const secureToken = btoa(`${poNumberForSubmit}-${Date.now()}`); // Mock secure token
+      const secureToken = btoa(`${poNumberForSubmit}-${Date.now()}`);
       
       const traderLink = `${appUrl}/public/trader-form?poId=${poNumberForSubmit}&token=${secureToken}`;
       const transporterLink = `${appUrl}/public/transporter-form?poId=${poNumberForSubmit}&token=${secureToken}`;
       
-      const traderMsg = `*Purchase Order: ${poNumberForSubmit}*\nHi, please confirm acceptance of the new order. Click the secure link below to view details and confirm:\n${traderLink}`;
-      const transporterMsg = `*Pickup Assignment: ${poNumberForSubmit}*\nHi, a new order is ready for pickup. Click the secure link below to view details and update pickup status:\n${transporterLink}`;
-      
-      // Attempt to find phone numbers from the first matched indent (if available in future mapping)
-      const mockTraderPhone = selectedIndent?.traderPhone || ""; 
-      const mockTransporterPhone = selectedIndent?.transporterPhone || "";
+      // === WhatsApp Messages with PO slip link ===
+      const poImageLine = poCopyLink ? `\n📎 PO Slip: ${poCopyLink}` : "";
+
+      // Trader: PO slip + acceptance question
+      const traderMsg = `🛒 *Purchase Order: ${poNumberForSubmit}*\n` +
+        `Company: ${companyName}\n` +
+        `Trade Name: ${traderNameKey}\n` +
+        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+        `Items: ${items.length} SKUs${poImageLine}\n\n` +
+        `✅ *Do you ACCEPT this order? Please confirm YES or NO.*`;
+
+      // Transporter: PO slip + pickup question
+      const transporterMsg = `🚛 *Pickup Assignment: ${poNumberForSubmit}*\n` +
+        `Transporter: ${transporterNameKey}\n` +
+        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+        `Items: ${items.length} SKUs${poImageLine}\n\n` +
+        `📦 *Did you PICK UP this order? Reply YES (picked) or NO (not picked).*`;
+
+      // Receiver: item-wise details
+      const itemDetails = items.map((i, idx) =>
+        `${idx + 1}. ${i.itemName}\n` +
+        `   Closing Qty: ${Math.round(i.closingStock || 0)} Pcs | ${Math.round((i.closingStock || 0) / (i.bottlesPerCase || 1))} Box\n` +
+        `   Order Qty: ${Math.round(i.reorderQuantityPcs || 0)} Pcs | ${Math.round(i.reorderQuantityBox || 0)} Box`
+      ).join("\n\n");
+
+      const receiverMsg = `📬 *New Delivery Incoming: ${poNumberForSubmit}*\n` +
+        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+        `From Trader: ${traderNameKey}\n\n` +
+        `*Items Detail:*\n${itemDetails}${poImageLine}\n\n` +
+        `Please be ready to receive and verify.`;
 
       setGeneratedWorkflowLinks({
         poNumber: poNumberForSubmit,
+        poCopyLink,
         traderLink,
         transporterLink,
         traderMsg,
         transporterMsg,
-        traderPhone: mockTraderPhone,
-        transporterPhone: mockTransporterPhone
+        receiverMsg,
+        traderPhone: autoTraderPhone,
+        transporterPhone: autoTransporterPhone,
+        receiverPhone: autoReceiverPhone,
       });
       
       // Reset sending status
-      setWhatsAppStatus({ trader: null, transporter: null });
-      setIsSendingWhatsApp({ trader: false, transporter: false });
+      setWhatsAppStatus({ trader: null, transporter: null, receiver: null });
+      setIsSendingWhatsApp({ trader: false, transporter: false, receiver: false });
 
       
       setShowSuccessAnimation(true);
@@ -1023,127 +1108,118 @@ export const PurchaseOrderPage: React.FC = () => {
       />
 
       {/* WhatsApp Workflow Modal */}
-      {showWhatsAppModal && generatedWorkflowLinks && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="p-6 border-b border-gray-200 bg-green-50">
-              <h3 className="text-xl font-bold text-green-800">PO Generated Successfully!</h3>
-              <p className="text-sm text-green-600 mt-1">PO Number: {generatedWorkflowLinks.poNumber}</p>
-            </div>
-            
-            <div className="p-6 space-y-6">
-              <p className="text-sm text-gray-600">
-                Automated workflow links have been generated. Send them via WhatsApp to trigger the confirmation process.
-              </p>
-              
-              <div className="space-y-4">
-                {/* Trader Section */}
-                <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
-                  <h4 className="font-semibold text-gray-900 mb-2">1. Trader Confirmation</h4>
-                  <div className="flex flex-col gap-2 mb-3">
-                    <input 
-                      type="text" 
-                      placeholder="Trader WhatsApp Number (e.g. 919876543210)" 
-                      value={generatedWorkflowLinks.traderPhone}
-                      onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? {...prev, traderPhone: e.target.value} : null)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 outline-none text-sm"
-                    />
-                  </div>
-                  <button 
-                    onClick={async () => {
-                      if (!generatedWorkflowLinks.traderPhone) return alert("Please enter Trader Phone Number");
-                      setIsSendingWhatsApp(prev => ({...prev, trader: true}));
-                      try {
-                        const res = await fetch(`https://api.maytapi.com/api/654f0c29-bfe7-42f2-b5a9-81638a716206/102579/sendMessage`, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'x-maytapi-key': '9fcce0ed-0e27-423f-946f-14141bc6589a'
-                          },
-                          body: JSON.stringify({
-                            to_number: generatedWorkflowLinks.traderPhone,
-                            type: 'text',
-                            message: generatedWorkflowLinks.traderMsg
-                          })
-                        });
-                        if (res.ok) {
-                          setWhatsAppStatus(prev => ({...prev, trader: 'Success'}));
-                        } else {
-                          setWhatsAppStatus(prev => ({...prev, trader: 'Failed'}));
-                        }
-                      } catch (err) {
-                        setWhatsAppStatus(prev => ({...prev, trader: 'Error'}));
-                      }
-                      setIsSendingWhatsApp(prev => ({...prev, trader: false}));
-                    }}
+      {showWhatsAppModal && generatedWorkflowLinks && (() => {
+        const MAYTAPI_URL = `https://api.maytapi.com/api/654f0c29-bfe7-42f2-b5a9-81638a716206/102579/sendMessage`;
+        const MAYTAPI_KEY = '9fcce0ed-0e27-423f-946f-14141bc6589a';
+
+        const sendWhatsApp = async (
+          role: 'trader' | 'transporter' | 'receiver',
+          phone: string,
+          message: string,
+          imageUrl?: string
+        ) => {
+          if (!phone) return alert(`Please enter ${role} phone number (e.g. 919876543210)`);
+          setIsSendingWhatsApp(prev => ({ ...prev, [role]: true }));
+          try {
+            const body: any = imageUrl
+              ? { to_number: phone, type: 'image', message, image: imageUrl }
+              : { to_number: phone, type: 'text', message };
+            const res = await fetch(MAYTAPI_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-maytapi-key': MAYTAPI_KEY },
+              body: JSON.stringify(body),
+            });
+            setWhatsAppStatus(prev => ({ ...prev, [role]: res.ok ? 'Success' : 'Failed' }));
+          } catch {
+            setWhatsAppStatus(prev => ({ ...prev, [role]: 'Error' }));
+          }
+          setIsSendingWhatsApp(prev => ({ ...prev, [role]: false }));
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto">
+              <div className="p-6 border-b border-gray-200 bg-green-50">
+                <h3 className="text-xl font-bold text-green-800">✅ PO Generated Successfully!</h3>
+                <p className="text-sm text-green-600 mt-1">PO Number: <strong>{generatedWorkflowLinks.poNumber}</strong></p>
+                {generatedWorkflowLinks.poCopyLink && (
+                  <a href={generatedWorkflowLinks.poCopyLink} target="_blank" rel="noopener noreferrer"
+                    className="text-xs text-blue-600 underline mt-1 block">View PO Slip →</a>
+                )}
+              </div>
+
+              <div className="p-6 space-y-5">
+                <p className="text-sm text-gray-500">Send the PO slip with confirmation request to all parties via WhatsApp.</p>
+
+                {/* 1. Trader */}
+                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
+                  <h4 className="font-bold text-blue-800 mb-1">1. 🛒 Trader Confirmation</h4>
+                  <p className="text-xs text-blue-600 mb-3 italic">Message: "Do you accept this order?"</p>
+                  <input type="text" placeholder="Trader WhatsApp No. (e.g. 919876543210)"
+                    value={generatedWorkflowLinks.traderPhone}
+                    onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? { ...prev, traderPhone: e.target.value } : null)}
+                    className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm mb-3"
+                  />
+                  <button
+                    onClick={() => sendWhatsApp('trader', generatedWorkflowLinks.traderPhone, generatedWorkflowLinks.traderMsg, generatedWorkflowLinks.poCopyLink || undefined)}
                     disabled={isSendingWhatsApp.trader || whatsAppStatus.trader === 'Success'}
-                    className="flex items-center justify-center gap-2 w-full py-2 bg-green-500 text-white rounded font-medium hover:bg-green-600 transition-colors disabled:opacity-50"
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600 transition disabled:opacity-50"
                   >
-                    {isSendingWhatsApp.trader ? "Sending via API..." : whatsAppStatus.trader === 'Success' ? "Sent Successfully ✓" : "Send via Maytapi API"}
+                    {isSendingWhatsApp.trader ? '⏳ Sending...' : whatsAppStatus.trader === 'Success' ? '✅ Sent Successfully' : '📤 Send to Trader'}
                   </button>
-                  {whatsAppStatus.trader === 'Failed' && <p className="text-red-500 text-xs mt-1">Failed to send message. Please check number.</p>}
+                  {whatsAppStatus.trader === 'Failed' && <p className="text-red-500 text-xs mt-1">❌ Failed. Check phone number format.</p>}
                 </div>
-                
-                {/* Transporter Section */}
-                <div className="bg-gray-50 border border-gray-200 p-4 rounded-lg">
-                  <h4 className="font-semibold text-gray-900 mb-2">2. Transporter Pickup</h4>
-                  <div className="flex flex-col gap-2 mb-3">
-                    <input 
-                      type="text" 
-                      placeholder="Transporter WhatsApp Number (e.g. 919876543210)" 
-                      value={generatedWorkflowLinks.transporterPhone}
-                      onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? {...prev, transporterPhone: e.target.value} : null)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-green-500 outline-none text-sm"
-                    />
-                  </div>
-                  <button 
-                    onClick={async () => {
-                      if (!generatedWorkflowLinks.transporterPhone) return alert("Please enter Transporter Phone Number");
-                      setIsSendingWhatsApp(prev => ({...prev, transporter: true}));
-                      try {
-                        const res = await fetch(`https://api.maytapi.com/api/654f0c29-bfe7-42f2-b5a9-81638a716206/102579/sendMessage`, {
-                          method: 'POST',
-                          headers: {
-                            'Content-Type': 'application/json',
-                            'x-maytapi-key': '9fcce0ed-0e27-423f-946f-14141bc6589a'
-                          },
-                          body: JSON.stringify({
-                            to_number: generatedWorkflowLinks.transporterPhone,
-                            type: 'text',
-                            message: generatedWorkflowLinks.transporterMsg
-                          })
-                        });
-                        if (res.ok) {
-                          setWhatsAppStatus(prev => ({...prev, transporter: 'Success'}));
-                        } else {
-                          setWhatsAppStatus(prev => ({...prev, transporter: 'Failed'}));
-                        }
-                      } catch (err) {
-                        setWhatsAppStatus(prev => ({...prev, transporter: 'Error'}));
-                      }
-                      setIsSendingWhatsApp(prev => ({...prev, transporter: false}));
-                    }}
+
+                {/* 2. Transporter */}
+                <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl">
+                  <h4 className="font-bold text-orange-800 mb-1">2. 🚛 Transporter Pickup</h4>
+                  <p className="text-xs text-orange-600 mb-3 italic">Message: "Did you pick up or not?"</p>
+                  <input type="text" placeholder="Transporter WhatsApp No. (e.g. 919876543210)"
+                    value={generatedWorkflowLinks.transporterPhone}
+                    onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? { ...prev, transporterPhone: e.target.value } : null)}
+                    className="w-full px-3 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none text-sm mb-3"
+                  />
+                  <button
+                    onClick={() => sendWhatsApp('transporter', generatedWorkflowLinks.transporterPhone, generatedWorkflowLinks.transporterMsg, generatedWorkflowLinks.poCopyLink || undefined)}
                     disabled={isSendingWhatsApp.transporter || whatsAppStatus.transporter === 'Success'}
-                    className="flex items-center justify-center gap-2 w-full py-2 bg-green-500 text-white rounded font-medium hover:bg-green-600 transition-colors disabled:opacity-50"
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-orange-500 text-white rounded-lg font-bold hover:bg-orange-600 transition disabled:opacity-50"
                   >
-                    {isSendingWhatsApp.transporter ? "Sending via API..." : whatsAppStatus.transporter === 'Success' ? "Sent Successfully ✓" : "Send via Maytapi API"}
+                    {isSendingWhatsApp.transporter ? '⏳ Sending...' : whatsAppStatus.transporter === 'Success' ? '✅ Sent Successfully' : '📤 Send to Transporter'}
                   </button>
-                  {whatsAppStatus.transporter === 'Failed' && <p className="text-red-500 text-xs mt-1">Failed to send message. Please check number.</p>}
+                  {whatsAppStatus.transporter === 'Failed' && <p className="text-red-500 text-xs mt-1">❌ Failed. Check phone number format.</p>}
+                </div>
+
+                {/* 3. Receiver */}
+                <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
+                  <h4 className="font-bold text-purple-800 mb-1">3. 📬 Receiver Notification</h4>
+                  <p className="text-xs text-purple-600 mb-3 italic">Message: Item details with closing & order qty</p>
+                  <input type="text" placeholder="Receiver WhatsApp No. (e.g. 919876543210)"
+                    value={generatedWorkflowLinks.receiverPhone}
+                    onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? { ...prev, receiverPhone: e.target.value } : null)}
+                    className="w-full px-3 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-400 outline-none text-sm mb-3"
+                  />
+                  <button
+                    onClick={() => sendWhatsApp('receiver', generatedWorkflowLinks.receiverPhone, generatedWorkflowLinks.receiverMsg, generatedWorkflowLinks.poCopyLink || undefined)}
+                    disabled={isSendingWhatsApp.receiver || whatsAppStatus.receiver === 'Success'}
+                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-purple-500 text-white rounded-lg font-bold hover:bg-purple-600 transition disabled:opacity-50"
+                  >
+                    {isSendingWhatsApp.receiver ? '⏳ Sending...' : whatsAppStatus.receiver === 'Success' ? '✅ Sent Successfully' : '📤 Send to Receiver'}
+                  </button>
+                  {whatsAppStatus.receiver === 'Failed' && <p className="text-red-500 text-xs mt-1">❌ Failed. Check phone number format.</p>}
                 </div>
               </div>
-            </div>
-            
-            <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end">
-              <button
-                onClick={() => setShowWhatsAppModal(false)}
-                className="px-6 py-2 bg-gray-900 text-white rounded-lg font-medium hover:bg-gray-800 transition-colors"
-              >
-                Done
-              </button>
+
+              <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end">
+                <button onClick={() => setShowWhatsAppModal(false)}
+                  className="px-6 py-2 bg-gray-900 text-white rounded-lg font-bold hover:bg-gray-800 transition">
+                  Done
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
 
     </div>
   );

@@ -357,19 +357,24 @@ const Dashboard = () => {
         return `${yyyy}-${mm}-${dd}`;
       };
 
+      const today = new Date();
       const queryStart = formatString(start);
-      const queryEnd = formatString(end);
+      let queryEnd = formatString(end);
       let totalDaysInMonth = end.getDate();
 
-      const today = new Date();
       if (today.getMonth() === start.getMonth() && today.getFullYear() === start.getFullYear()) {
         totalDaysInMonth = today.getDate();
+        // Cap queryEnd to today's date to avoid 500 error from biometric API
+        queryEnd = formatString(today);
       }
 
       const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.name}&FromDate=${queryStart}&ToDate=${queryEnd}`;
 
       const response = await fetch(API_URL);
-      if (!response.ok) throw new Error('API failed');
+      if (!response.ok) {
+        setAttendanceData([]);
+        return;
+      }
 
       const result = await response.json();
       if (!Array.isArray(result)) throw new Error('Invalid API Data');

@@ -68,26 +68,42 @@ interface IndentItem {
   status?: string;
   actualTimestamp1?: string;
   _rowIndex?: number;
+  // Added fields from IndexSheet
+  shopId?: string;
+  partyId?: string;
+  brandId?: string;
+  liquorType?: string;
+  closingStockInBox?: number;
+  perDayAvgSaleFix?: number;
+  perDayAvgSaleLastWeek?: number;
+  partyName?: string;
 }
 
 interface ColumnVisibility {
   timestamp: boolean;
+  shopId: boolean;
+  shopName: boolean;
   indentNumber: boolean;
+  partyId: boolean;
+  traderName: boolean;
+  brandId: boolean;
+  brandName: boolean;
   skuCode: boolean;
   itemName: boolean;
-  brandName: boolean;
-  moq: boolean;
-  maxLevel: boolean;
-  closingStock: boolean;
-  reorderQuantityPcs: boolean;
-  approved: boolean;
-  traderName: boolean;
-  liquor: boolean;
-  size: boolean;
   sizeML: boolean;
   bottlesPerCase: boolean;
+  liquorType: boolean;
+  closingStock: boolean;
+  closingStockInBox: boolean;
+  perDayAvgSaleFix: boolean;
+  perDayAvgSaleLastWeek: boolean;
+  reorderQuantityPcs: boolean;
   reorderQuantityBox: boolean;
-  shopName: boolean;
+  moq: boolean;
+  maxLevel: boolean;
+  approved: boolean;
+  liquor: boolean;
+  size: boolean;
   orderBy: boolean;
 }
 
@@ -128,22 +144,29 @@ export const ApprovalPage: React.FC = () => {
 
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>({
     timestamp: true,
+    shopId: true,
+    shopName: true,
     indentNumber: true,
+    partyId: true,
+    traderName: true,
+    brandId: true,
+    brandName: true,
     skuCode: true,
     itemName: true,
-    brandName: true,
-    moq: true,
-    maxLevel: true,
-    closingStock: true,
-    reorderQuantityPcs: true,
-    approved: true,
-    traderName: true,
-    liquor: true,
-    size: true,
     sizeML: true,
     bottlesPerCase: true,
+    liquorType: true,
+    closingStock: true,
+    closingStockInBox: true,
+    perDayAvgSaleFix: true,
+    perDayAvgSaleLastWeek: true,
+    reorderQuantityPcs: true,
     reorderQuantityBox: true,
-    shopName: true,
+    moq: true,
+    maxLevel: true,
+    approved: true,
+    liquor: true,
+    size: true,
     orderBy: true,
   });
 
@@ -219,22 +242,29 @@ export const ApprovalPage: React.FC = () => {
 
   const columnLabels = {
     timestamp: "Timestamp",
-    indentNumber: "Indent Number",
-    skuCode: "SKU Code",
-    itemName: "Item Name",
+    shopId: "Shop ID",
+    shopName: "Shop Name",
+    indentNumber: "Indent No",
+    partyId: "Party ID",
+    traderName: "Party Name",
+    brandId: "Brand ID",
     brandName: "Brand Name",
+    skuCode: "Item ID / SKU Code",
+    itemName: "Item Name",
+    sizeML: "Size (Mls)",
+    bottlesPerCase: "BPC",
+    liquorType: "Liquor Type",
+    closingStock: "Closing Stock in Bottle",
+    closingStockInBox: "Closing Stock In Box",
+    perDayAvgSaleFix: "Per Day Avg Sale Fix",
+    perDayAvgSaleLastWeek: "Per day Avg Sale (Last Week)",
+    reorderQuantityPcs: "Order In Bottles",
+    reorderQuantityBox: "Order In Box",
     moq: "MOQ",
     maxLevel: "Max Level",
-    closingStock: "Closing Stock",
-    reorderQuantityPcs: "Reorder Quantity (Pcs)",
     approved: "Approved",
-    traderName: "Trader Name",
     liquor: "Liquor",
     size: "Size",
-    sizeML: "SIZE (ML)",
-    bottlesPerCase: "Bottles Per Case",
-    reorderQuantityBox: "Reorder Quantity (Box)",
-    shopName: "Shop Name",
     orderBy: "Order By",
   };
 
@@ -599,13 +629,13 @@ export const ApprovalPage: React.FC = () => {
   return (
     <div className="p-4 min-h-screen bg-white md:p-6 w-full lg:w-[calc(100vw-279px)] overflow-hidden">
       {/* Header */}
-      <div className="flex flex-col gap-4 justify-between items-start mb-6 sm:flex-row sm:items-center">
+      <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 md:text-3xl">
-            Approval Management
+            {activeTab === 'pending' ? 'Approval Index Sheet' : 'Approval Management'}
           </h1>
           <p className="mt-1 text-sm text-gray-600 md:text-base">
-            Review and approve purchase indents
+            {activeTab === 'pending' ? 'View and approve detailed index tracking.' : 'Review and approve purchase indents'}
           </p>
         </div>
       </div>
@@ -864,32 +894,7 @@ export const ApprovalPage: React.FC = () => {
                     </div>
                     <div className="overflow-y-auto p-4">
                       <div className="space-y-1">
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={columnVisibility.orderBy}
-                            onChange={() => toggleColumn("orderBy")}
-                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                          />
-                          <span>{columnLabels.orderBy}</span>
-                        </label>
-                        <label className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            checked={columnVisibility.timestamp}
-                            onChange={() => toggleColumn("timestamp")}
-                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                            disabled={activeTab !== "history"}
-                          />
-                          <span
-                            className={
-                              activeTab !== "history" ? "text-gray-400" : ""
-                            }
-                          >
-                            {columnLabels.timestamp}
-                          </span>
-                        </label>
-                        {Object.entries(columnLabels).map(([key, label]) => (
+                        {Object.keys(columnLabels).map((key) => (
                           <label
                             key={key}
                             className="flex gap-2 items-center p-2 rounded transition-colors cursor-pointer hover:bg-gray-50"
@@ -903,9 +908,10 @@ export const ApprovalPage: React.FC = () => {
                                 toggleColumn(key as keyof ColumnVisibility)
                               }
                               className="w-4 h-4 text-blue-600 rounded cursor-pointer focus:ring-2 focus:ring-blue-500"
+                              disabled={key === 'timestamp' && activeTab !== "history"}
                             />
-                            <span className="text-sm text-gray-700">
-                              {label}
+                            <span className={`text-sm ${key === 'timestamp' && activeTab !== "history" ? 'text-gray-400' : 'text-gray-700'}`}>
+                              {columnLabels[key as keyof typeof columnLabels]}
                             </span>
                           </label>
                         ))}
@@ -949,14 +955,44 @@ export const ApprovalPage: React.FC = () => {
                           Timestamp
                         </th>
                       )}
+                      {columnVisibility.shopId && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Shop ID
+                        </th>
+                      )}
+                      {columnVisibility.shopName && (
+                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Shop Name
+                        </th>
+                      )}
                       {columnVisibility.indentNumber && (
                         <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Indent Number
+                          Indent No
+                        </th>
+                      )}
+                      {columnVisibility.partyId && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Party ID
+                        </th>
+                      )}
+                      {columnVisibility.traderName && (
+                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Party Name
+                        </th>
+                      )}
+                      {columnVisibility.brandId && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Brand ID
+                        </th>
+                      )}
+                      {columnVisibility.brandName && (
+                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Brand Name
                         </th>
                       )}
                       {columnVisibility.skuCode && (
                         <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          SKU Code
+                          Item ID / SKU Code
                         </th>
                       )}
                       {columnVisibility.itemName && (
@@ -964,9 +1000,49 @@ export const ApprovalPage: React.FC = () => {
                           Item Name
                         </th>
                       )}
-                      {columnVisibility.brandName && (
-                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Brand Name
+                      {columnVisibility.sizeML && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Size (Mls)
+                        </th>
+                      )}
+                      {columnVisibility.bottlesPerCase && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          BPC
+                        </th>
+                      )}
+                      {columnVisibility.liquorType && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Liquor Type
+                        </th>
+                      )}
+                      {columnVisibility.closingStock && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Closing Stock in Bottle
+                        </th>
+                      )}
+                      {columnVisibility.closingStockInBox && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Closing Stock In Box
+                        </th>
+                      )}
+                      {columnVisibility.perDayAvgSaleFix && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Per Day Avg Sale Fix
+                        </th>
+                      )}
+                      {columnVisibility.perDayAvgSaleLastWeek && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Per day Avg Sale (Last Week)
+                        </th>
+                      )}
+                      {columnVisibility.reorderQuantityPcs && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Order In Bottles
+                        </th>
+                      )}
+                      {columnVisibility.reorderQuantityBox && (
+                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                          Order In Box
                         </th>
                       )}
                       {columnVisibility.moq && (
@@ -979,24 +1055,9 @@ export const ApprovalPage: React.FC = () => {
                           Max Level
                         </th>
                       )}
-                      {columnVisibility.closingStock && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Closing Stock
-                        </th>
-                      )}
-                      {columnVisibility.reorderQuantityPcs && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Reorder Quantity (Pcs)
-                        </th>
-                      )}
                       {columnVisibility.approved && (
                         <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
                           Approved
-                        </th>
-                      )}
-                      {columnVisibility.traderName && (
-                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Trader Name
                         </th>
                       )}
                       {columnVisibility.liquor && (
@@ -1007,26 +1068,6 @@ export const ApprovalPage: React.FC = () => {
                       {columnVisibility.size && (
                         <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
                           Size
-                        </th>
-                      )}
-                      {columnVisibility.sizeML && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          SIZE (ML)
-                        </th>
-                      )}
-                      {columnVisibility.bottlesPerCase && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Bottles Per Case
-                        </th>
-                      )}
-                      {columnVisibility.reorderQuantityBox && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Reorder Quantity (Box)
-                        </th>
-                      )}
-                      {columnVisibility.shopName && (
-                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Shop Name
                         </th>
                       )}
                       {columnVisibility.orderBy && (
@@ -1077,65 +1118,24 @@ export const ApprovalPage: React.FC = () => {
                                 : "-"}
                             </td>
                           )}
+                          {columnVisibility.shopId && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {indent.shopId || "-"}
+                            </td>
+                          )}
+                          {columnVisibility.shopName && (
+                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
+                              {indent.shopName || "-"}
+                            </td>
+                          )}
                           {columnVisibility.indentNumber && (
                             <td className="px-4 py-4 font-medium text-gray-900 whitespace-nowrap">
                               {indent.indentNumber}
                             </td>
                           )}
-                          {columnVisibility.skuCode && (
+                          {columnVisibility.partyId && (
                             <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.skuCode}
-                            </td>
-                          )}
-                          {columnVisibility.itemName && (
-                            <td className="px-4 py-4 min-w-[200px] text-gray-600 whitespace-nowrap">
-                              {indent.itemName}
-                            </td>
-                          )}
-                          {columnVisibility.brandName && (
-                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
-                              {indent.brandName}
-                            </td>
-                          )}
-                          {columnVisibility.moq && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.moq)}
-                            </td>
-                          )}
-                          {columnVisibility.maxLevel && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.maxLevel)}
-                            </td>
-                          )}
-                          {columnVisibility.closingStock && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.closingStock)}
-                            </td>
-                          )}
-                          {columnVisibility.reorderQuantityPcs && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
-                                <input
-                                  type="number"
-                                  value={indent.reorderQuantityPcs}
-                                  onChange={(e) => handleInputChange(indent, 'reorderQuantityPcs', e.target.value)}
-                                  className="w-24 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              ) : (
-                                formatNumber(indent.reorderQuantityPcs)
-                              )}
-                            </td>
-                          )}
-                          {columnVisibility.approved && (
-                            <td className="px-4 py-4 whitespace-nowrap">
-                              <span
-                                className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-yellow-100 text-yellow-800"
-                                  }`}
-                              >
-                                {indent.approved}
-                              </span>
+                              {indent.partyId || "-"}
                             </td>
                           )}
                           {columnVisibility.traderName && (
@@ -1152,14 +1152,24 @@ export const ApprovalPage: React.FC = () => {
                               )}
                             </td>
                           )}
-                          {columnVisibility.liquor && (
+                          {columnVisibility.brandId && (
                             <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.liquor}
+                              {indent.brandId || "-"}
                             </td>
                           )}
-                          {columnVisibility.size && (
+                          {columnVisibility.brandName && (
+                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
+                              {indent.brandName}
+                            </td>
+                          )}
+                          {columnVisibility.skuCode && (
                             <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.size}
+                              {indent.skuCode}
+                            </td>
+                          )}
+                          {columnVisibility.itemName && (
+                            <td className="px-4 py-4 min-w-[200px] text-gray-600 whitespace-nowrap">
+                              {indent.itemName}
                             </td>
                           )}
                           {columnVisibility.sizeML && (
@@ -1170,6 +1180,45 @@ export const ApprovalPage: React.FC = () => {
                           {columnVisibility.bottlesPerCase && (
                             <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
                               {formatNumber(indent.bottlesPerCase)}
+                            </td>
+                          )}
+                          {columnVisibility.liquorType && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {indent.liquorType || indent.liquor || "-"}
+                            </td>
+                          )}
+                          {columnVisibility.closingStock && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {formatNumber(indent.closingStock)}
+                            </td>
+                          )}
+                          {columnVisibility.closingStockInBox && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {formatNumber(indent.closingStockInBox)}
+                            </td>
+                          )}
+                          {columnVisibility.perDayAvgSaleFix && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {formatNumber(indent.perDayAvgSaleFix)}
+                            </td>
+                          )}
+                          {columnVisibility.perDayAvgSaleLastWeek && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {formatNumber(indent.perDayAvgSaleLastWeek)}
+                            </td>
+                          )}
+                          {columnVisibility.reorderQuantityPcs && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
+                                <input
+                                  type="number"
+                                  value={indent.reorderQuantityPcs}
+                                  onChange={(e) => handleInputChange(indent, 'reorderQuantityPcs', e.target.value)}
+                                  className="w-24 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                              ) : (
+                                formatNumber(indent.reorderQuantityPcs)
+                              )}
                             </td>
                           )}
                           {columnVisibility.reorderQuantityBox && (
@@ -1186,9 +1235,36 @@ export const ApprovalPage: React.FC = () => {
                               )}
                             </td>
                           )}
-                          {columnVisibility.shopName && (
-                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
-                              {indent.shopName}
+                          {columnVisibility.moq && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {formatNumber(indent.moq)}
+                            </td>
+                          )}
+                          {columnVisibility.maxLevel && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {formatNumber(indent.maxLevel)}
+                            </td>
+                          )}
+                          {columnVisibility.approved && (
+                            <td className="px-4 py-4 whitespace-nowrap">
+                              <span
+                                className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-yellow-100 text-yellow-800"
+                                  }`}
+                              >
+                                {indent.approved}
+                              </span>
+                            </td>
+                          )}
+                          {columnVisibility.liquor && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {indent.liquor}
+                            </td>
+                          )}
+                          {columnVisibility.size && (
+                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
+                              {indent.size}
                             </td>
                           )}
                           {columnVisibility.orderBy && (

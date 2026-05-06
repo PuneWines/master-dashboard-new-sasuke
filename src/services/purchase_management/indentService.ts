@@ -143,6 +143,7 @@ export interface IndentItem {
   orderSubmittedBy: string;
   sizes: string[];
   transporterName?: string;
+  receiverManager?: string;
   poNumber?: string;
   poGeneratedAt?: string;
   actualTimestamp1?: string;
@@ -211,6 +212,15 @@ const getMockData = (): IndentItem[] => {
   ];
 };
 
+export interface VendorMasterEntry {
+  traderName: string;
+  traderPhone: string;
+  transporterName: string;
+  transporterPhone: string;
+  receiverName: string;
+  receiverPhone: string;
+}
+
 interface IndentService {
   getIndents(): Promise<IndentItem[]>;
   updateIndent(
@@ -223,18 +233,20 @@ interface IndentService {
     items: {
       id: string;
       updates: Partial<IndentItem>;
-      secondaryKeys?: { skuCode?: string; itemName?: string };
+      secondaryKeys?: { skuCode?: string; itemName?: string },
       rowIndexOverride?: number;
     }[]
   ): Promise<void>;
   getMasterCompanies(): Promise<string[]>;
   getTransporterNames(): Promise<string[]>;
   getApprovalNames(): Promise<string[]>;
+  getReceiverManagers(): Promise<string[]>;
   getLoginUsers(): Promise<LoginUser[]>;
   getColumnAData(): Promise<string[]>;
   getTimestampsByIndent(): Promise<Record<string, string>>;
   getProcessedPOIndentNumbers(): Promise<Set<string>>;
   getTraderNames(): Promise<string[]>;
+  getVendorMasterData(): Promise<VendorMasterEntry[]>;
 }
 
 // Function to fetch data from column A of the FMS sheet
@@ -632,6 +644,20 @@ export const indentService: IndentService = {
           val(
             item,
             ["Order Submitted By", "order_submitted_by", "orderSubmittedBy"],
+            ""
+          )
+        ),
+        receiverManager: String(
+          val(
+            item,
+            [
+              "Receiver Manager",
+              "receiver_manager",
+              "receiverManager",
+              "Receiver Manager Name",
+              "Planned 3", // Column Y
+              "#25",
+            ],
             ""
           )
         ),
@@ -1516,6 +1542,12 @@ export const indentService: IndentService = {
               "actual_timestamp_1",
               "Actual 3", // Column X
             ]);
+            const colReceiverManager = findCol([
+              "Receiver Manager",
+              "receiver_manager",
+              "receiverManager",
+              "Planned 3", // Column Y
+            ]);
             const colTransportName = findCol([
               "Transport Name",
               "transport_name",
@@ -1616,6 +1648,7 @@ export const indentService: IndentService = {
               colStatus,
               colRemarks,
               colActualTimestamp1,
+              colReceiverManager,
               colTransportName,
               colPOCopyLink,
               colPONumber,
@@ -1690,6 +1723,7 @@ export const indentService: IndentService = {
             // Parallelize all updates for faster processing
             await Promise.all([
               setPOCell(pos.colActualTimestamp1, updates.actualTimestamp1, "Actual 3"),
+              setPOCell(pos.colReceiverManager, updates.receiverManager, "Receiver Manager"),
               setPOCell(pos.colTransportName, updates.transporterName, "Transport Name"),
               setPOCell(pos.colPOCopyLink, updates.poCopyLink, "PO Copy"),
               setPOCell(pos.colPONumber, updates.poNumber, "Po No."),
@@ -1736,7 +1770,7 @@ export const indentService: IndentService = {
     items: {
       id: string;
       updates: Partial<IndentItem>;
-      secondaryKeys?: { skuCode?: string; itemName?: string };
+      secondaryKeys?: { skuCode?: string; itemName?: string },
       rowIndexOverride?: number;
     }[]
   ): Promise<void> {
@@ -1932,12 +1966,10 @@ export const indentService: IndentService = {
     }
 
     try {
-      // Build a clean URL for the Master sheet
       const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
       url.searchParams.set("action", "fetch");
       url.searchParams.set("sheetId", SHEET_ID);
       url.searchParams.set("sheet", "Master");
-      url.searchParams.set("range", "Master!B2:B");
       
       console.log("Fetching transporter names from:", url.toString());
       const response = await fetch(url.toString(), {
@@ -1949,16 +1981,21 @@ export const indentService: IndentService = {
 
       const data = await response.json();
       const rows: any[] = Array.isArray(data) ? data : data.data || data.values || [];
+      if (rows.length === 0) return ["ABC Logistics"];
+
+      // Find the "Transport Name" column index dynamically
+      const header = rows[0];
+      let colIdx = 0; // Default to Column A
+      if (Array.isArray(header)) {
+        const foundIdx = header.findIndex(h => String(h || "").toLowerCase().includes("transport"));
+        if (foundIdx !== -1) colIdx = foundIdx;
+      }
 
       const transporters = rows
+        .slice(1) // Skip header
         .map((row: any) => {
-          if (Array.isArray(row)) return String(row[0] || "").trim();
-          return String(
-            row["Transport Name"] || 
-            row.TransportName || 
-            row["Trasnport Name"] || // Misspelling in sheet
-            ""
-          ).trim();
+          if (Array.isArray(row)) return String(row[colIdx] || "").trim();
+          return String(row["Transport Name"] || row.TransportName || row["Trasnport Name"] || "").trim();
         })
         .filter(Boolean);
 
@@ -2294,6 +2331,106 @@ export const indentService: IndentService = {
     } catch (error) {
       console.error("Error fetching approval names:", error);
       return ["Ram Karan", "Shrawan"];
+    }
+  },
+
+  async getReceiverManagers(): Promise<string[]> {
+    if (!SCRIPT_URL) {
+      return ["Manager A", "Manager B"];
+    }
+
+    try {
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", SHEET_ID);
+      url.searchParams.set("sheet", "Master");
+      
+      console.log("Fetching receiver managers from:", url.toString());
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+      const data = await response.json();
+      const rows: any[] = Array.isArray(data) ? data : data.data || data.values || [];
+      if (rows.length === 0) return ["Manager A"];
+
+      // Find the "Receiver Manager" column index dynamically
+      const header = rows[0];
+      let colIdx = 3; // Default to Column D (index 3)
+      if (Array.isArray(header)) {
+        const foundIdx = header.findIndex(h => String(h || "").toLowerCase().includes("receiver manager"));
+        if (foundIdx !== -1) colIdx = foundIdx;
+      }
+
+      const managers = rows
+        .slice(1) // Skip header
+        .map((row: any) => {
+          if (Array.isArray(row)) return String(row[colIdx] || "").trim();
+          return String(row["Receiver Manager"] || row.ReceiverManager || "").trim();
+        })
+        .filter(Boolean);
+
+      return managers.length > 0 ? [...new Set(managers)].sort() : ["Manager A", "Manager B"];
+    } catch (error) {
+      console.error("Error fetching receiver managers:", error);
+      return ["Manager A", "Manager B"];
+    }
+  },
+
+  async getVendorMasterData(): Promise<VendorMasterEntry[]> {
+    if (!SCRIPT_URL) {
+      return [];
+    }
+    try {
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", SHEET_ID);
+      url.searchParams.set("sheet", "Vendor Master");
+      console.log("Fetching Vendor Master data from:", url.toString());
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      let rows: any[] = Array.isArray(data) ? data : data?.data || data?.values || [];
+      // Skip header row
+      if (rows.length > 0) {
+        const firstRow = rows[0];
+        const isHeader = Array.isArray(firstRow)
+          ? firstRow.some((c: any) => /trader|vendor|phone|name/i.test(String(c)))
+          : false;
+        if (isHeader) rows = rows.slice(1);
+      }
+      return rows
+        .map((row: any): VendorMasterEntry => {
+          if (Array.isArray(row)) {
+            // Expected columns: A=TraderName, B=TraderPhone, C=TransporterName, D=TransporterPhone, E=ReceiverName, F=ReceiverPhone
+            return {
+              traderName: String(row[0] || "").trim(),
+              traderPhone: String(row[1] || "").trim(),
+              transporterName: String(row[2] || "").trim(),
+              transporterPhone: String(row[3] || "").trim(),
+              receiverName: String(row[4] || "").trim(),
+              receiverPhone: String(row[5] || "").trim(),
+            };
+          }
+          return {
+            traderName: String(row["Trader Name"] || row.traderName || "").trim(),
+            traderPhone: String(row["Trader Phone"] || row.traderPhone || row["Phone"] || "").trim(),
+            transporterName: String(row["Transporter Name"] || row.transporterName || "").trim(),
+            transporterPhone: String(row["Transporter Phone"] || row.transporterPhone || "").trim(),
+            receiverName: String(row["Receiver Name"] || row.receiverName || "").trim(),
+            receiverPhone: String(row["Receiver Phone"] || row.receiverPhone || "").trim(),
+          };
+        })
+        .filter((e) => e.traderName);
+    } catch (error) {
+      console.error("Error fetching Vendor Master data:", error);
+      return [];
     }
   },
 };

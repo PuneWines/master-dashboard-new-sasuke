@@ -224,6 +224,24 @@ const Attendance = () => {
       let fromDate = `${selectedYear}-${paddedMonth}-${startDay}`;
       let toDate = `${selectedYear}-${paddedMonth}-${endDay}`;
 
+      // Cap toDate to today if the selected month/year is current or in the future
+      const today = new Date();
+      const selectedDate = new Date(selectedYear, selectedMonth - 1, 1);
+      const currentDate = new Date(today.getFullYear(), today.getMonth(), 1);
+
+      if (selectedDate >= currentDate) {
+        const todayDay = String(today.getDate()).padStart(2, '0');
+        const todayMonth = String(today.getMonth() + 1).padStart(2, '0');
+        const todayYear = today.getFullYear();
+        // If it's a future month, we shouldn't even query, but capping it to today is safer
+        if (selectedDate > currentDate) {
+           toDate = `${todayYear}-${todayMonth}-${todayDay}`;
+           fromDate = `${todayYear}-${todayMonth}-01`; // Also move fromDate to current month
+        } else {
+           toDate = `${selectedYear}-${paddedMonth}-${todayDay}`;
+        }
+      }
+
       if (selectedYear < 2026 || (selectedYear === 2026 && selectedMonth < 4)) {
         setAttendanceData([]);
         return;
@@ -249,19 +267,29 @@ const Attendance = () => {
           })
         );
         rawLogs = allResponses.flat();
-        if (rawLogs.length === 0) throw new Error('No logs found for this period across any device.');
+        if (rawLogs.length === 0) {
+          setAttendanceData([]);
+          return;
+        }
       } else {
         const API_URL = `${DEVICE_LOGS_BASE_URL}?APIKey=211616032630&SerialNumber=${selectedDevice.serial}&DeviceName=${selectedDevice.apiName}&FromDate=${fromDate}&ToDate=${toDate}`;
         const response = await fetch(API_URL);
-        if (!response.ok) throw new Error(`Device Server returned ${response.status}. It might be offline.`);
+        if (!response.ok) {
+          setAttendanceData([]);
+          return;
+        }
 
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
-          throw new Error('Device server returned an HTML error page. Please check connectivity.');
+          setAttendanceData([]);
+          return;
         }
 
         const data = await response.json();
-        if (!Array.isArray(data)) throw new Error('No logs found for this period.');
+        if (!Array.isArray(data)) {
+          setAttendanceData([]);
+          return;
+        }
         rawLogs = data.map(l => ({ ...l, _DeviceName: selectedDevice.name }));
       }
 

@@ -18,6 +18,8 @@ interface POData {
     reorderQuantityPcs: string;
     reorderQuantityBox: string;
     sizeML: string;
+    closingStockPcs?: string;
+    closingStockBox?: string;
   }>;
   remarks?: string;
 }
@@ -102,10 +104,29 @@ const generatePOImage = async (poData: POData): Promise<Blob> => {
   ctx.fillStyle = headerColor;
   ctx.fillRect(0, 0, width, 236); // ~20mm height
   
+  // Company name centered
   ctx.fillStyle = "white";
   ctx.font = "bold 52px Arial, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(poData.companyName || "THE LIQUOR STORY", width / 2, 150);
+  
+  // === JAGWANI LOGO on right side of header ===
+  try {
+    const logoImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Logo load failed'));
+      img.src = '/logo.png';
+    });
+    // Draw logo at top-right, fitting within header height
+    const logoH = 200;
+    const logoW = (logoImg.width / logoImg.height) * logoH;
+    ctx.drawImage(logoImg, width - logoW - 60, 18, logoW, logoH);
+  } catch (_) {
+    // Logo failed to load – skip silently
+    console.warn('Jagwani logo could not be loaded for PO slip');
+  }
   
   // Reset styles
   ctx.fillStyle = "black";
