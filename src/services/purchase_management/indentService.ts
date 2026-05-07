@@ -170,6 +170,11 @@ export interface IndentItem {
   difference?: string;
   receiveRemarks?: string;
   pendingReceivingQty?: string; // From column AS
+  traderVerificationLink?: string; // From column BN (#66)
+  transporterVerificationLink?: string; // From column BM (#65)
+  traderPhone?: string;
+  transporterPhone?: string;
+  receiverPhone?: string;
 }
 
 // Helper function to check if response is JSON
@@ -221,6 +226,23 @@ export interface VendorMasterEntry {
   receiverPhone: string;
 }
 
+export interface POContactEntry {
+  indentNumber: string;
+  shopName: string;
+  traderName: string;
+  traderPhone: string;
+  transporterName: string;
+  transporterPhone: string;
+  receiverManager: string;
+  receiverPhone: string;
+}
+
+export interface TransporterVerificationEntry {
+  indentNumber: string;
+  shopName: string;
+  formLink: string;
+}
+
 interface IndentService {
   getIndents(): Promise<IndentItem[]>;
   updateIndent(
@@ -247,6 +269,8 @@ interface IndentService {
   getProcessedPOIndentNumbers(): Promise<Set<string>>;
   getTraderNames(): Promise<string[]>;
   getVendorMasterData(): Promise<VendorMasterEntry[]>;
+  getPOContactData(): Promise<POContactEntry[]>;
+  getTransporterVerificationLinks(): Promise<TransporterVerificationEntry[]>;
 }
 
 // Function to fetch data from column A of the FMS sheet
@@ -843,6 +867,12 @@ export const indentService: IndentService = {
             )
           ),
         },
+        traderVerificationLink: String(
+          val(item, ["Trader Verification", "BN", "#66"], "")
+        ),
+        transporterVerificationLink: String(
+          val(item, ["Transporter Verification", "BK", "#63"], "")
+        ),
         _rowIndex: realRowIndex,
       });
 
@@ -1282,14 +1312,20 @@ export const indentService: IndentService = {
         poUrl.searchParams.set("sheet", "PO");
         if (SHEET_ID) poUrl.searchParams.set("sheetId", SHEET_ID);
         const poRowData = [
-          new Date().toISOString().slice(0, 19).replace("T", " "), // Timestamp col A
-          id, // Indent Number col B
-          updates.shopName || "", // Shop Name col C
-          updates.transporterName || "", // Transport Name col D
-          updates.poCopyLink || "", // PO Copy col E
-          updates.poNumber || "", // Po No. col F
-          updates.poQty || "", // PO Qty col G
-          updates.remarksFrontend || "", // Remarks1 col H
+          new Date().toISOString().slice(0, 19).replace("T", " "), // Timestamp col A (0)
+          id, // Indent Number col B (1)
+          updates.shopName || "", // Shop Name col C (2)
+          updates.transporterName || "", // Transport Name col D (3)
+          updates.poCopyLink || "", // PO Copy col E (4)
+          updates.poNumber || "", // Po No. col F (5)
+          updates.poQty || "", // PO Qty col G (6)
+          updates.remarksFrontend || "", // Remarks1 col H (7)
+          updates.traderName || "", // Trader Name col I (8)
+          updates.receiverManager || "", // Receiver Manager col J (9)
+          updates.skuCode || "", // SKU Code col K (10)
+          updates.traderPhone || "", // Trader Phone col L (11)
+          updates.transporterPhone || "", // Transporter Phone col M (12)
+          updates.receiverPhone || "", // Receiver Phone col N (13)
         ];
         console.log("PO rowData being sent:", poRowData);
         poUrl.searchParams.set("rowData", JSON.stringify(poRowData));
@@ -1962,7 +1998,7 @@ export const indentService: IndentService = {
 
   async getTransporterNames(): Promise<string[]> {
     if (!SCRIPT_URL) {
-      return ["ABC Logistics", "XYZ Transport"];
+      return [];
     }
 
     try {
@@ -1981,28 +2017,21 @@ export const indentService: IndentService = {
 
       const data = await response.json();
       const rows: any[] = Array.isArray(data) ? data : data.data || data.values || [];
-      if (rows.length === 0) return ["ABC Logistics"];
+      if (rows.length === 0) return [];
 
-      // Find the "Transport Name" column index dynamically
-      const header = rows[0];
-      let colIdx = 0; // Default to Column A
-      if (Array.isArray(header)) {
-        const foundIdx = header.findIndex(h => String(h || "").toLowerCase().includes("transport"));
-        if (foundIdx !== -1) colIdx = foundIdx;
-      }
-
+      // Strictly use Column A (index 0) for Transporter Names from Master sheet
       const transporters = rows
         .slice(1) // Skip header
         .map((row: any) => {
-          if (Array.isArray(row)) return String(row[colIdx] || "").trim();
-          return String(row["Transport Name"] || row.TransportName || row["Trasnport Name"] || "").trim();
+          if (Array.isArray(row)) return String(row[0] || "").trim();
+          return String(row["Transport Name"] || row.TransportName || row[0] || "").trim();
         })
         .filter(Boolean);
 
-      return transporters.length > 0 ? [...new Set(transporters)].sort() : ["ABC Logistics"];
+      return transporters.length > 0 ? [...new Set(transporters)].sort() : [];
     } catch (error) {
       console.error("Error fetching transporter names:", error);
-      return ["ABC Logistics"];
+      return [];
     }
   },
 
@@ -2336,7 +2365,7 @@ export const indentService: IndentService = {
 
   async getReceiverManagers(): Promise<string[]> {
     if (!SCRIPT_URL) {
-      return ["Manager A", "Manager B"];
+      return [];
     }
 
     try {
@@ -2355,7 +2384,7 @@ export const indentService: IndentService = {
 
       const data = await response.json();
       const rows: any[] = Array.isArray(data) ? data : data.data || data.values || [];
-      if (rows.length === 0) return ["Manager A"];
+      if (rows.length === 0) return [];
 
       // Find the "Receiver Manager" column index dynamically
       const header = rows[0];
@@ -2373,10 +2402,10 @@ export const indentService: IndentService = {
         })
         .filter(Boolean);
 
-      return managers.length > 0 ? [...new Set(managers)].sort() : ["Manager A", "Manager B"];
+      return managers.length > 0 ? [...new Set(managers)].sort() : [];
     } catch (error) {
       console.error("Error fetching receiver managers:", error);
-      return ["Manager A", "Manager B"];
+      return [];
     }
   },
 
@@ -2430,6 +2459,104 @@ export const indentService: IndentService = {
         .filter((e) => e.traderName);
     } catch (error) {
       console.error("Error fetching Vendor Master data:", error);
+      return [];
+    }
+  },
+
+  async getPOContactData(): Promise<POContactEntry[]> {
+    if (!SCRIPT_URL) return [];
+    try {
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", SHEET_ID);
+      url.searchParams.set("sheet", "PO");
+      
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      let rows: any[] = Array.isArray(data) ? data : data?.data || data?.values || [];
+      
+      if (rows.length > 0) {
+        const firstRow = rows[0];
+        const isHeader = Array.isArray(firstRow)
+          ? firstRow.some((c: any) => /indent|shop|name/i.test(String(c)))
+          : false;
+        if (isHeader) rows = rows.slice(1);
+      }
+
+      return rows.map((row: any): POContactEntry => {
+        if (Array.isArray(row)) {
+          return {
+            indentNumber: String(row[1] || "").trim(), // B
+            shopName: String(row[2] || "").trim(),     // C
+            transporterName: String(row[3] || "").trim(), // D
+            traderName: String(row[8] || "").trim(),      // I
+            receiverManager: String(row[9] || "").trim(), // J
+            traderPhone: String(row[11] || "").trim(),    // L
+            transporterPhone: String(row[12] || "").trim(), // M
+            receiverPhone: String(row[13] || "").trim(),    // N
+          };
+        }
+        return {
+          indentNumber: String(row["Indent Number"] || row.indentNumber || "").trim(),
+          shopName: String(row["Shop Name"] || row.shopName || "").trim(),
+          transporterName: String(row["Transport Name"] || row.transporterName || "").trim(),
+          traderName: String(row["Trader Name"] || row.traderName || "").trim(),
+          receiverManager: String(row["Receiver Manager"] || row.receiverManager || "").trim(),
+          traderPhone: String(row["Trader Phone"] || row.traderPhone || "").trim(),
+          transporterPhone: String(row["Transporter Phone"] || row.transporterPhone || "").trim(),
+          receiverPhone: String(row["Receiver Phone"] || row.receiverPhone || "").trim(),
+        };
+      });
+    } catch (error) {
+      console.error("Error fetching PO Contact data:", error);
+      return [];
+    }
+  },
+
+  async getTransporterVerificationLinks(): Promise<TransporterVerificationEntry[]> {
+    if (!SCRIPT_URL) return [];
+    try {
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", SHEET_ID);
+      url.searchParams.set("sheet", "Transporter Verification");
+      
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      let rows: any[] = Array.isArray(data) ? data : data?.data || data?.values || [];
+      
+      if (rows.length > 0) {
+        const firstRow = rows[0];
+        const isHeader = Array.isArray(firstRow)
+          ? firstRow.some((c: any) => /indent|shop|form|link/i.test(String(c)))
+          : false;
+        if (isHeader) rows = rows.slice(1);
+      }
+
+      return rows.map((row: any): TransporterVerificationEntry => {
+        if (Array.isArray(row)) {
+          return {
+            indentNumber: String(row[1] || "").trim(), // B
+            shopName: String(row[2] || "").trim(),     // C
+            formLink: String(row[8] || "").trim(),     // I
+          };
+        }
+        return {
+          indentNumber: String(row["Indent Number"] || row.indentNumber || "").trim(),
+          shopName: String(row["Shop Name"] || row.shopName || "").trim(),
+          formLink: String(row["Form Link"] || row.formLink || row["Link"] || row["Google Form"] || "").trim(),
+        };
+      });
+    } catch (error) {
+      console.error("Error fetching Transporter Verification links:", error);
       return [];
     }
   },

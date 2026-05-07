@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Filter, X, Send, Eye, Truck } from "lucide-react";
 import { format } from "date-fns";
-import { indentService, VendorMasterEntry } from "../../services/purchase_management/indentService";
+import { indentService, VendorMasterEntry, POContactEntry, TransporterVerificationEntry } from "../../services/purchase_management/indentService";
 import { storageUtils } from "../../utils/purchase_management/storage";
 import { generatePOPDF } from "../../utils/purchase_management/pdfGenerator";
 import { SuccessAnimation } from "./SuccessAnimation";
@@ -62,6 +62,9 @@ interface POIndentItem {
   actualTimestamp3?: string;
   traderPhone?: string;
   transporterPhone?: string;
+  traderVerificationLink?: string;
+  transporterVerificationLink?: string;
+  receiverManager?: string;
   _rowIndex?: number;
 }
 
@@ -146,10 +149,10 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
 
 
   const [transporterNames, setTransporterNames] = useState<string[]>([
-    "wait loading",
+    "Loading...",
   ]);
   const [transporterName, setTransporterName] = useState("");
-  const [receiverManagers, setReceiverManagers] = useState<string[]>(["wait loading"]);
+  const [receiverManagers, setReceiverManagers] = useState<string[]>(["Loading..."]);
   const [receiverManager, setReceiverManager] = useState("");
   const [remarks, setRemarks] = useState("");
 
@@ -584,7 +587,13 @@ export const PurchaseOrderPage: React.FC = () => {
     transporter: null,
     receiver: null
   });
+  const [sentPickupQtyLinks, setSentPickupQtyLinks] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('sent_pickup_qty_links');
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  });
   const [vendorMasterData, setVendorMasterData] = useState<VendorMasterEntry[]>([]);
+  const [poContactData, setPoContactData] = useState<POContactEntry[]>([]);
+  const [transporterVerificationLinks, setTransporterVerificationLinks] = useState<TransporterVerificationEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -630,11 +639,20 @@ export const PurchaseOrderPage: React.FC = () => {
       try {
         setLoading(true);
         setError(null);
-        const [data, poSet, vendorMaster] = await Promise.all([
+        const [data, poSet, vendorMaster, poContacts, verificationLinks] = await Promise.all([
           indentService.getIndents(),
           indentService.getProcessedPOIndentNumbers(),
           indentService.getVendorMasterData(),
+          indentService.getPOContactData(),
+          indentService.getTransporterVerificationLinks(),
         ]);
+        console.log("📊 Raw data length:", data.length);
+        setIndents(data);
+        setProcessedIndentNumbers(poSet);
+        setVendorMasterData(vendorMaster);
+        setPoContactData(poContacts);
+        setTransporterVerificationLinks(verificationLinks);
+        
         const userShopRaw = storageUtils.getCurrentUser()?.shopName || "";
         const allowedShops =
           userShopRaw && userShopRaw.toLowerCase() !== "all"
@@ -649,8 +667,6 @@ export const PurchaseOrderPage: React.FC = () => {
           )
           : (data as POIndentItem[]);
         setIndents(filtered);
-        setProcessedIndentNumbers(poSet);
-        setVendorMasterData(vendorMaster);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load indents");
       } finally {
@@ -659,6 +675,70 @@ export const PurchaseOrderPage: React.FC = () => {
     };
     fetchIndents();
   }, []);
+
+  // --- NEW: Polling Service for Pickup Qty Follow-up ---
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      console.log("🔍 Polling Transporter Verification for follow-up links...");
+      try {
+        const freshLinks = await indentService.getTransporterVerificationLinks();
+        setTransporterVerificationLinks(freshLinks);
+
+        // Check for links that haven't been sent yet
+        for (const entry of freshLinks) {
+          if (entry.formLink && !sentPickupQtyLinks.has(entry.formLink)) {
+            // Find the transporter phone number from poContactData
+            const contact = poContactData.find(c => c.indentNumber === entry.indentNumber);
+            if (contact && contact.transporterPhone) {
+              console.log(`🚀 Automatically sending Pickup Qty Form to ${contact.transporterPhone} for Indent ${entry.indentNumber}`);
+              
+              const message = `📦 *Pickup Qty Form Ready: ${entry.indentNumber}*\n\n` +
+                `Transporter Verification complete. Please fill the Pickup Quantity details using the link below:\n\n` +
+                `📝 *Pickup Qty Form:* ${entry.formLink}\n\n` +
+                `Thank you!`;
+
+              // Trigger send (reusing the logic from the modal but without the UI state updates)
+              await sendWhatsAppSilent('transporter', contact.transporterPhone, message);
+              
+              // Mark as sent
+              setSentPickupQtyLinks(prev => {
+                const next = new Set(prev).add(entry.formLink);
+                localStorage.setItem('sent_pickup_qty_links', JSON.stringify(Array.from(next)));
+                return next;
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }, 30000); // Poll every 30 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [transporterVerificationLinks, sentPickupQtyLinks, poContactData]);
+
+  const sendWhatsAppSilent = async (role: string, phone: string, message: string) => {
+    const productId = import.meta.env.VITE_MAYTAPI_PRODUCT_ID || '654f0c29-bfe7-42f2-b5a9-81638a716206';
+    const phoneId = import.meta.env.VITE_MAYTAPI_PHONE_ID || '102579';
+    const token = import.meta.env.VITE_MAYTAPI_TOKEN || '9fcce0ed-0e27-423f-946f-14141bc6589a';
+    
+    let formattedPhone = phone.trim();
+    if (formattedPhone.length === 10) formattedPhone = '91' + formattedPhone;
+
+    const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+    const baseUrl = isLocal ? '/maytapi' : 'https://api.maytapi.com';
+    const apiUrl = `${baseUrl}/api/${productId}/${phoneId}/sendMessage`;
+
+    try {
+      await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-maytapi-key': token },
+        body: JSON.stringify({ to_number: formattedPhone, type: 'text', message }),
+      });
+    } catch (e) {
+      console.error("Silent WhatsApp send failed:", e);
+    }
+  };
 
   useEffect(() => {
     const duplicates = indents
@@ -761,6 +841,65 @@ export const PurchaseOrderPage: React.FC = () => {
       const currentTime = new Date().toISOString();
       const currentDate = formatTimestamp(new Date());
 
+      // === Vendor Master Phone Lookup ===
+      const traderNameKey = selectedIndent.traderName || "";
+      const transporterNameKey = transporterName.trim();
+      
+      // Find matching entry by trader name
+      const vendorEntry = vendorMasterData.find(
+        (v) => v.traderName.toLowerCase() === traderNameKey.toLowerCase()
+      );
+      // Find transporter phone by transporter name match
+      const transporterEntry = vendorMasterData.find(
+        (v) => v.transporterName.toLowerCase() === transporterNameKey.toLowerCase()
+      );
+      // Find receiver phone by receiver manager name match
+      const currentReceiverManager = (receiverManager || selectedIndent.receiverManager || "").trim();
+      const receiverEntry = vendorMasterData.find(
+        (v) => v.receiverName.toLowerCase() === currentReceiverManager.toLowerCase()
+      );
+
+      // --- PO Sheet Auto-fill Logic (Robust Lookup) ---
+      const currentIndentNo = (selectedIndent.indentNumber || "").trim();
+      const currentShopName = (selectedIndent.shopName || "").trim();
+      
+      const findPOContact = (nameKey: string, role: 'trader' | 'transporter' | 'receiver') => {
+        const normalizedName = nameKey.toLowerCase().trim();
+        if (!normalizedName) return null;
+
+        // Try exact match with Indent Number first
+        let match = [...poContactData].reverse().find(p => 
+          p.indentNumber.trim() === currentIndentNo && 
+          p.shopName.trim() === currentShopName && 
+          (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
+        );
+
+        // If no exact indent match, try latest match by Shop + Name
+        if (!match) {
+          match = [...poContactData].reverse().find(p => 
+            p.shopName.trim() === currentShopName && 
+            (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
+          );
+        }
+        
+        // If still no match, try match by Name only (latest globally)
+        if (!match) {
+          match = [...poContactData].reverse().find(p => 
+            (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
+          );
+        }
+
+        return match;
+      };
+
+      const poTraderMatch = findPOContact(traderNameKey, 'trader');
+      const poTransporterMatch = findPOContact(transporterNameKey, 'transporter');
+      const poReceiverMatch = findPOContact(currentReceiverManager, 'receiver');
+
+      const autoTraderPhone = poTraderMatch?.traderPhone || vendorEntry?.traderPhone || selectedIndent?.traderPhone || "";
+      const autoTransporterPhone = poTransporterMatch?.transporterPhone || transporterEntry?.transporterPhone || selectedIndent?.transporterPhone || "";
+      const autoReceiverPhone = poReceiverMatch?.receiverPhone || receiverEntry?.receiverPhone || vendorEntry?.receiverPhone || "";
+
       // 3. Update backend for each item
       const updatePromises = items.map(async (item) => {
         const itemUpdate = {
@@ -778,6 +917,12 @@ export const PurchaseOrderPage: React.FC = () => {
           isPO: true,
           shopName: item.shopName,
           plannedAE: currentDate, // Set so item appears in Get Lifting pending tab
+          // Fields for PO Sheet insertion
+          traderName: item.traderName || item.partyName || "",
+          skuCode: item.skuCode || "",
+          traderPhone: autoTraderPhone,
+          transporterPhone: autoTransporterPhone,
+          receiverPhone: autoReceiverPhone,
         };
 
         try {
@@ -813,30 +958,12 @@ export const PurchaseOrderPage: React.FC = () => {
 
       setShowModal(false);
       setSelectedIndent(null);
-      
-      // === Vendor Master Phone Lookup ===
-      const traderNameKey = selectedIndent.traderName || "";
-      const transporterNameKey = transporterName.trim();
-      
-      // Find matching entry by trader name
-      const vendorEntry = vendorMasterData.find(
-        (v) => v.traderName.toLowerCase() === traderNameKey.toLowerCase()
-      );
-      // Find transporter phone by transporter name match
-      const transporterEntry = vendorMasterData.find(
-        (v) => v.transporterName.toLowerCase() === transporterNameKey.toLowerCase()
-      );
-
-      const autoTraderPhone = vendorEntry?.traderPhone || selectedIndent?.traderPhone || "";
-      const autoTransporterPhone = transporterEntry?.transporterPhone || selectedIndent?.transporterPhone || "";
-      const autoReceiverPhone = vendorEntry?.receiverPhone || "";
 
       // Generate Secure Workflow Links
       const appUrl = window.location.origin;
       const secureToken = btoa(`${poNumberForSubmit}-${Date.now()}`);
       
-      const traderLink = `${appUrl}/public/trader-form?poId=${poNumberForSubmit}&token=${secureToken}`;
-      const transporterLink = `${appUrl}/public/transporter-form?poId=${poNumberForSubmit}&token=${secureToken}`;
+      const traderLink = selectedIndent.traderVerificationLink || `${appUrl}/public/trader-form?poId=${poNumberForSubmit}&token=${secureToken}`;
       
       // === WhatsApp Messages with PO slip link ===
       const poImageLine = poCopyLink ? `\n📎 PO Slip: ${poCopyLink}` : "";
@@ -847,14 +974,8 @@ export const PurchaseOrderPage: React.FC = () => {
         `Trade Name: ${traderNameKey}\n` +
         `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
         `Items: ${items.length} SKUs${poImageLine}\n\n` +
+        `📝 *Verification Form:* ${traderLink}\n\n` +
         `✅ *Do you ACCEPT this order? Please confirm YES or NO.*`;
-
-      // Transporter: PO slip + pickup question
-      const transporterMsg = `🚛 *Pickup Assignment: ${poNumberForSubmit}*\n` +
-        `Transporter: ${transporterNameKey}\n` +
-        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
-        `Items: ${items.length} SKUs${poImageLine}\n\n` +
-        `📦 *Did you PICK UP this order? Reply YES (picked) or NO (not picked).*`;
 
       // Receiver: item-wise details
       const itemDetails = items.map((i, idx) =>
@@ -869,6 +990,53 @@ export const PurchaseOrderPage: React.FC = () => {
         `*Items Detail:*\n${itemDetails}${poImageLine}\n\n` +
         `Please be ready to receive and verify.`;
 
+      // --- CRITICAL: Re-fetch PO Contact Data AND Verification Links AFTER submission ---
+      console.log("🔄 Re-fetching PO Contact data and Verification links...");
+      const [freshPOContacts, freshVerificationLinks] = await Promise.all([
+        indentService.getPOContactData(),
+        indentService.getTransporterVerificationLinks()
+      ]);
+      setPoContactData(freshPOContacts);
+      setTransporterVerificationLinks(freshVerificationLinks);
+
+      // --- Re-run the lookup logic with fresh data ---
+      const findPOContactFresh = (nameKey: string, role: 'trader' | 'transporter' | 'receiver', data: POContactEntry[]) => {
+        const normalizedName = nameKey.toLowerCase().trim();
+        if (!normalizedName) return null;
+        return [...data].reverse().find(p => 
+          p.indentNumber.trim() === currentIndentNo && 
+          p.shopName.trim() === currentShopName && 
+          (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
+        );
+      };
+
+      const freshTraderMatch = findPOContactFresh(traderNameKey, 'trader', freshPOContacts);
+      const freshTransporterMatch = findPOContactFresh(transporterNameKey, 'transporter', freshPOContacts);
+      const freshReceiverMatch = findPOContactFresh(currentReceiverManager, 'receiver', freshPOContacts);
+      
+      const freshVerificationMatch = [...freshVerificationLinks].reverse().find(v => 
+        v.indentNumber.trim() === currentIndentNo && 
+        v.shopName.trim() === currentShopName
+      );
+
+      const finalTraderPhone = freshTraderMatch?.traderPhone || autoTraderPhone;
+      const finalTransporterPhone = freshTransporterMatch?.transporterPhone || autoTransporterPhone;
+      const finalReceiverPhone = freshReceiverMatch?.receiverPhone || autoReceiverPhone;
+      
+      const finalTransporterLink = selectedIndent.transporterVerificationLink || `${appUrl}/public/transporter-form?indent=${encodeURIComponent(currentIndentNo)}`;
+      const transporterLink = finalTransporterLink;
+
+      // Transporter: PO slip + pickup question
+      const transporterMsg = `🚛 *Pickup Assignment: ${poNumberForSubmit}*\n` +
+        `Transporter: ${transporterNameKey}\n` +
+        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+        `Items: ${items.length} SKUs${poImageLine}\n\n` +
+        `📝 *Verification Form:* ${transporterLink}\n\n` +
+        `*Note:* Once you submit the Verification form, you will receive the Pickup Quantity form link automatically.\n\n` +
+        `📦 *Did you PICK UP this order? Reply YES (picked) or NO (not picked).*`;
+
+      console.log("📱 Final Receiver Phone for UI:", finalReceiverPhone);
+
       setGeneratedWorkflowLinks({
         poNumber: poNumberForSubmit,
         poCopyLink,
@@ -877,9 +1045,9 @@ export const PurchaseOrderPage: React.FC = () => {
         traderMsg,
         transporterMsg,
         receiverMsg,
-        traderPhone: autoTraderPhone,
-        transporterPhone: autoTransporterPhone,
-        receiverPhone: autoReceiverPhone,
+        traderPhone: finalTraderPhone,
+        transporterPhone: finalTransporterPhone,
+        receiverPhone: finalReceiverPhone,
       });
       
       // Reset sending status
@@ -1107,11 +1275,7 @@ export const PurchaseOrderPage: React.FC = () => {
         onComplete={() => setShowSuccessAnimation(false)}
       />
 
-      {/* WhatsApp Workflow Modal */}
       {showWhatsAppModal && generatedWorkflowLinks && (() => {
-        const MAYTAPI_URL = `https://api.maytapi.com/api/654f0c29-bfe7-42f2-b5a9-81638a716206/102579/sendMessage`;
-        const MAYTAPI_KEY = '9fcce0ed-0e27-423f-946f-14141bc6589a';
-
         const sendWhatsApp = async (
           role: 'trader' | 'transporter' | 'receiver',
           phone: string,
@@ -1119,21 +1283,65 @@ export const PurchaseOrderPage: React.FC = () => {
           imageUrl?: string
         ) => {
           if (!phone) return alert(`Please enter ${role} phone number (e.g. 919876543210)`);
+          
+          // Prepend 91 if it's a 10-digit number
+          let formattedPhone = phone.trim();
+          if (formattedPhone.length === 10) {
+            formattedPhone = '91' + formattedPhone;
+          }
+
           setIsSendingWhatsApp(prev => ({ ...prev, [role]: true }));
+          
           try {
-            const body: any = imageUrl
-              ? { to_number: phone, type: 'image', message, image: imageUrl }
-              : { to_number: phone, type: 'text', message };
-            const res = await fetch(MAYTAPI_URL, {
+            // Use environment variables and proxy if on localhost
+            const productId = import.meta.env.VITE_MAYTAPI_PRODUCT_ID || '654f0c29-bfe7-42f2-b5a9-81638a716206';
+            const phoneId = import.meta.env.VITE_MAYTAPI_PHONE_ID || '102579';
+            const token = import.meta.env.VITE_MAYTAPI_TOKEN || '9fcce0ed-0e27-423f-946f-14141bc6589a';
+            
+            const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+            const baseUrl = isLocal ? '/maytapi' : 'https://api.maytapi.com';
+            const apiUrl = `${baseUrl}/api/${productId}/${phoneId}/sendMessage`;
+
+            let body: any;
+            if (imageUrl) {
+              // Using 'media' type as seen in WhatsappSendMessage.tsx
+              body = {
+                to_number: formattedPhone,
+                type: 'media',
+                message: imageUrl,
+                text: message
+              };
+            } else {
+              body = {
+                to_number: formattedPhone,
+                type: 'text',
+                message: message
+              };
+            }
+
+            const res = await fetch(apiUrl, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-maytapi-key': MAYTAPI_KEY },
+              headers: { 
+                'Content-Type': 'application/json',
+                'x-maytapi-key': token 
+              },
               body: JSON.stringify(body),
             });
-            setWhatsAppStatus(prev => ({ ...prev, [role]: res.ok ? 'Success' : 'Failed' }));
-          } catch {
+
+            const data = await res.json();
+            
+            if (data.success || data.status === 'success' || res.ok) {
+              setWhatsAppStatus(prev => ({ ...prev, [role]: 'Success' }));
+            } else {
+              setWhatsAppStatus(prev => ({ ...prev, [role]: 'Failed' }));
+              console.error(`WhatsApp send failed for ${role}:`, data);
+            }
+          } catch (error) {
+            console.error(`WhatsApp send error for ${role}:`, error);
             setWhatsAppStatus(prev => ({ ...prev, [role]: 'Error' }));
+          } finally {
+            setIsSendingWhatsApp(prev => ({ ...prev, [role]: false }));
           }
-          setIsSendingWhatsApp(prev => ({ ...prev, [role]: false }));
         };
 
         return (
