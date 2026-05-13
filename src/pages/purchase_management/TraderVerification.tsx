@@ -1,129 +1,180 @@
-import React, { useState, useEffect } from 'react';
-import { CheckCircle, XCircle, Search, Clock, FileText, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Clock, FileText, AlertCircle, CheckCircle, Clock4 } from 'lucide-react';
+import { format } from 'date-fns';
 import { indentService } from '../../services/purchase_management/indentService';
 
 export const TraderVerification: React.FC = () => {
-  const [orders, setOrders] = useState<any[]>([]);
+  const [indents, setIndents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [submitting, setSubmitting] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchOrders = async () => {
+    const fetchIndents = async () => {
       try {
         setLoading(true);
         const data = await indentService.getIndents();
-        // Filter for orders that are approved but not yet confirmed by trader
-        // For demonstration, we'll show all approved orders
-        const approvedOrders = data.filter(i => i.approved === "Yes" || i.status === "approved");
-        setOrders(approvedOrders);
+        setIndents(data);
       } catch (err) {
-        console.error("Failed to fetch orders for trader verification", err);
+        console.error("Failed to fetch indents for trader verification", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchOrders();
+    fetchIndents();
   }, []);
 
-  const handleAction = async (orderId: string, status: 'Accepted' | 'Rejected') => {
-    setSubmitting(orderId);
+  const hasValue = (s?: string) => 
+    typeof s === "string" && s.trim() !== "" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined";
+
+  const filteredIndents = useMemo(() => {
+    return indents.filter(item => {
+      // Visibility Condition: Planned 4 and Actual 4 must be NOT NULL
+      const isVisible = hasValue(item.planned4) && hasValue(item.actual4);
+      if (!isVisible) return false;
+
+      const searchLower = searchTerm.toLowerCase();
+      return (
+        item.indentNumber?.toLowerCase().includes(searchLower) ||
+        item.itemName?.toLowerCase().includes(searchLower) ||
+        item.brandName?.toLowerCase().includes(searchLower) ||
+        item.traderName?.toLowerCase().includes(searchLower) ||
+        item.partyName?.toLowerCase().includes(searchLower) ||
+        item.shopName?.toLowerCase().includes(searchLower)
+      );
+    });
+  }, [indents, searchTerm]);
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr || dateStr.trim() === "" || dateStr.toLowerCase() === "null") return "-";
     try {
-      // Mock API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      alert(`Order ${orderId} has been ${status} by Trader.`);
-      setOrders(prev => prev.filter(o => o.id !== orderId));
-    } finally {
-      setSubmitting(null);
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return format(date, 'dd/MM/yyyy');
+      }
+      return dateStr;
+    } catch {
+      return dateStr;
     }
   };
 
-  const filteredOrders = orders.filter(o => 
-    o.indentNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    o.itemName?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const formatNum = (val: any) => {
+    if (val === undefined || val === null || val === "" || String(val).toLowerCase() === "null") return "-";
+    const num = Number(val);
+    return isNaN(num) ? val : num.toFixed(2);
+  };
 
   return (
-    <div className="p-6 bg-gray-50 min-h-screen w-full lg:w-[calc(100vw-280px)]">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Trader Verification</h1>
-        <p className="text-gray-500 mt-1">Confirm and verify order acceptance from traders.</p>
-      </div>
-
-      {/* Search and Filters */}
-      <div className="mb-6 relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-        <input
-          type="text"
-          placeholder="Search by PO number or Item..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm transition-all"
-        />
+    <div className="p-4 md:p-8 bg-[#f8fafc] min-h-screen w-full lg:w-[calc(100vw-280px)]">
+      {/* Header Section */}
+      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Trader Verification</h1>
+          <p className="text-slate-500 mt-1 flex items-center gap-2">
+            <Clock4 className="w-4 h-4" />
+            Monitoring order fulfillment and trader dispatch status.
+          </p>
+        </div>
+        
+        <div className="relative group">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+          <input
+            type="text"
+            placeholder="Search all columns..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full md:w-80 pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all text-slate-600"
+          />
+        </div>
       </div>
 
       {loading ? (
-        <div className="flex justify-center p-20">
-          <div className="animate-spin h-10 w-10 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+        <div className="flex flex-col items-center justify-center p-20 bg-white rounded-3xl border border-slate-100 shadow-sm">
+          <div className="animate-spin h-12 w-12 border-4 border-blue-600 border-t-transparent rounded-full mb-4"></div>
+          <p className="text-slate-500 font-medium animate-pulse">Fetching latest data...</p>
         </div>
-      ) : filteredOrders.length === 0 ? (
-        <div className="bg-white rounded-2xl p-12 text-center border border-gray-200 shadow-sm">
-          <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-            <FileText className="text-gray-400 w-8 h-8" />
+      ) : filteredIndents.length === 0 ? (
+        <div className="bg-white rounded-3xl p-16 text-center border border-slate-100 shadow-sm">
+          <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+            <FileText className="text-slate-300 w-10 h-10" />
           </div>
-          <h3 className="text-lg font-bold text-gray-900">No Pending Verifications</h3>
-          <p className="text-gray-500 mt-1">All orders have been processed or no approved orders found.</p>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">No Records Found</h3>
+          <p className="text-slate-500 max-w-sm mx-auto">
+            Currently no orders match the required verification criteria (Planned 4 & Actual 4 visibility).
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-6">
-          {filteredOrders.map(order => (
-            <div key={order.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-              <div className="p-6">
-                <div className="flex flex-col md:flex-row justify-between gap-4">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded uppercase tracking-wider">
-                        Pending Confirmation
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-xl shadow-slate-200/50 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/80 border-b border-slate-100">
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Indent #</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Appr. Date</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Item</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Brand</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">MOQ</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Max</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Stock</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qty (Pcs)</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Trader</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Size</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Box</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Shop</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Trader Status</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Dispatch Date</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Remarks</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredIndents.map((item, idx) => (
+                  <tr key={`${item.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors group">
+                    <td className="px-4 py-4 font-bold text-blue-600 whitespace-nowrap">{item.indentNumber}</td>
+                    <td className="px-4 py-4 text-slate-600 whitespace-nowrap">{formatDate(item.approvalDate)}</td>
+                    <td className="px-4 py-4 text-slate-500 font-mono text-xs">{item.skuCode}</td>
+                    <td className="px-4 py-4">
+                      <div className="font-semibold text-slate-900">{item.itemName}</div>
+                    </td>
+                    <td className="px-4 py-4 text-slate-600">{item.brandName}</td>
+                    <td className="px-4 py-4 text-center font-medium text-slate-700">{formatNum(item.moq)}</td>
+                    <td className="px-4 py-4 text-center font-medium text-slate-700">{formatNum(item.maxLevel)}</td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`px-2 py-1 rounded-lg text-xs font-bold ${Number(item.closingStock) < Number(item.moq) ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-700'}`}>
+                        {formatNum(item.closingStock)}
                       </span>
-                      <span className="text-gray-400 text-xs font-medium flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> 2 hours ago
+                    </td>
+                    <td className="px-4 py-4 text-center font-bold text-slate-900 bg-slate-50/30">{formatNum(item.reorderQuantityPcs)}</td>
+                    <td className="px-4 py-4 font-medium text-slate-700">{item.traderName || item.partyName}</td>
+                    <td className="px-4 py-4 text-slate-500">{item.sizeML} ml</td>
+                    <td className="px-4 py-4 text-center font-medium text-blue-700">{formatNum(item.reorderQuantityBox)}</td>
+                    <td className="px-4 py-4 font-medium text-slate-900 whitespace-nowrap">{item.shopName}</td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                        item.shopManagerStatus === 'Approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {item.shopManagerStatus || 'Pending'}
                       </span>
-                    </div>
-                    <h3 className="text-xl font-bold text-gray-900 mb-1">{order.itemName}</h3>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-600">
-                      <p><span className="font-medium">PO:</span> {order.indentNumber}</p>
-                      <p><span className="font-medium">Shop:</span> {order.shopName}</p>
-                      <p><span className="font-medium">Qty:</span> {order.reorderQuantityPcs} Bottles</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex items-center gap-3">
-                    <button
-                      onClick={() => handleAction(order.id, 'Rejected')}
-                      disabled={!!submitting}
-                      className="flex items-center gap-2 px-4 py-2 border border-red-200 text-red-600 hover:bg-red-50 rounded-xl font-bold transition-colors disabled:opacity-50"
-                    >
-                      <XCircle className="w-5 h-5" />
-                      Reject
-                    </button>
-                    <button
-                      onClick={() => handleAction(order.id, 'Accepted')}
-                      disabled={!!submitting}
-                      className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white hover:bg-green-700 rounded-xl font-bold shadow-sm transition-all disabled:opacity-50"
-                    >
-                      <CheckCircle className="w-5 h-5" />
-                      {submitting === order.id ? 'Processing...' : 'Accept Order'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-gray-50 px-6 py-3 border-t border-gray-100 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-blue-500" />
-                <p className="text-xs text-gray-500 font-medium">Please verify stock availability before accepting.</p>
-              </div>
-            </div>
-          ))}
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                        item.traderStatus === 'Accepted' ? 'bg-blue-100 text-blue-700' : 
+                        item.traderStatus === 'Rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {item.traderStatus || 'Waiting'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-slate-600 whitespace-nowrap">
+                      {formatDate(item.dispatchDate)}
+                    </td>
+                    <td className="px-4 py-4 text-slate-500 max-w-xs truncate" title={item.remarksTrader}>
+                      {item.remarksTrader || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

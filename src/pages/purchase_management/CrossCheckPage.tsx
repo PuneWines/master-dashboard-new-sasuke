@@ -90,6 +90,10 @@ interface IndentItem {
   actualAF?: string;
   plannedAK?: string;
   actualAL?: string;
+  actual6?: string;     // From column AW - set when lifting is completed
+  planned6?: string;    // From column AV
+  planned7?: string;    // From column BC - user requirement for receive pending
+  actual7?: string;     // From column BD - user requirement for receive history
   transportDifference?: string;
   pendingReceivingQty?: string; // From column AS
 }
@@ -107,6 +111,7 @@ interface ColumnVisibility {
   traderName: boolean;
   pendingReceivingQty: boolean;
   liftingDate: boolean;
+  liftingQty: boolean;
 }
 
 // ---------------------------------------------------------------------
@@ -131,7 +136,7 @@ const TableRow = React.memo(
         {/* Action */}
         {columnVisibility.action && (
           <td className="px-6 py-4 whitespace-nowrap">
-            {activeTab === "pending" && isTrulyEmpty(indent.actualAL) ? (
+            {activeTab === "pending" && isTrulyEmpty(indent.actual7) ? (
               <button
                 onClick={() => onCrossCheck(indent)}
                 className="flex gap-1 items-center px-3 py-1 text-sm text-white bg-purple-600 rounded-lg transition hover:bg-purple-700"
@@ -177,6 +182,13 @@ const TableRow = React.memo(
         {columnVisibility.liftingDate && (
           <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
             {formatDateOnly(indent.liftingDate || indent.actualAF)}
+          </td>
+        )}
+
+        {/* Lifting Qty */}
+        {columnVisibility.liftingQty && (
+          <td className="px-6 py-4 text-sm font-semibold text-blue-600 whitespace-nowrap">
+            {indent.liftingData?.qty || "-"}
           </td>
         )}
 
@@ -270,7 +282,9 @@ export const CrossCheckPage: React.FC = () => {
     receivedQty: "",
     difference: "",
     receiveRemarks: "",
+    receiverName: "",
   });
+  const [receiverNames, setReceiverNames] = useState<string[]>([]);
   const [indents, setIndents] = useState<IndentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -316,6 +330,7 @@ export const CrossCheckPage: React.FC = () => {
     traderName: true,
     pendingReceivingQty: true,
     liftingDate: true,
+    liftingQty: true,
   });
 
   // Helper function to process and validate image URLs
@@ -386,11 +401,16 @@ export const CrossCheckPage: React.FC = () => {
               localItem.receiveRemarks || googleItem.receiveRemarks,
             actualAF: !isTrulyEmpty(localItem.actualAF) ? localItem.actualAF : googleItem.actualAF,
             actualAL: !isTrulyEmpty(localItem.actualAL) ? localItem.actualAL : googleItem.actualAL,
+            actual6: !isTrulyEmpty(localItem.actual6) ? localItem.actual6 : (googleItem as IndentItem).actual6,
+            planned7: !isTrulyEmpty(localItem.planned7) ? localItem.planned7 : (googleItem as IndentItem).planned7,
+            actual7: !isTrulyEmpty(localItem.actual7) ? localItem.actual7 : (googleItem as IndentItem).actual7,
           };
         }
         return {
           ...googleItem,
           liftingDate: (googleItem as IndentItem).liftingDate || googleItem.actualAF,
+          planned7: (googleItem as IndentItem).planned7,
+          actual7: (googleItem as IndentItem).actual7,
         };
       });
 
@@ -422,6 +442,15 @@ export const CrossCheckPage: React.FC = () => {
 
   useEffect(() => {
     fetchIndents();
+    const fetchReceivers = async () => {
+      try {
+        const names = await indentService.getMasterReceivers();
+        setReceiverNames(names);
+      } catch (err) {
+        console.error("Error fetching receivers:", err);
+      }
+    };
+    fetchReceivers();
   }, [fetchIndents]);
 
   // Check for success message after reload
@@ -437,9 +466,14 @@ export const CrossCheckPage: React.FC = () => {
   // Nuclear Fix: Derive current indents directly based on activeTab
   const currentIndents = useMemo(() => {
     // 1. Get base list for the active tab
+    // Pending: BC (planned7) is NOT NULL AND BD (actual7) is NULL
     const baseList = activeTab === "pending" 
-      ? indents.filter((i) => !isTrulyEmpty(i.plannedAK) && isTrulyEmpty(i.actualAL))
-      : indents.filter((i) => !isTrulyEmpty(i.plannedAK) && !isTrulyEmpty(i.actualAL));
+      ? indents.filter((i) => !isTrulyEmpty(i.planned7) && isTrulyEmpty(i.actual7))
+      : indents.filter((i) => !isTrulyEmpty(i.actual7));
+      
+    if (activeTab === "pending" && baseList.length > 0) {
+      console.log("Pending Indents Sample (BC/BD Logic):", { id: baseList[0].id, planned7: baseList[0].planned7, actual7: baseList[0].actual7 });
+    }
 
     // 2. Apply Search & Filters
     const filtered = baseList.filter((indent) => {
@@ -501,10 +535,10 @@ export const CrossCheckPage: React.FC = () => {
 
   // For tab counts only (simplified)
   const pendingCount = useMemo(() => 
-    indents.filter((i) => !isTrulyEmpty(i.plannedAK) && isTrulyEmpty(i.actualAL)).length, 
+    indents.filter((i) => !isTrulyEmpty(i.planned7) && isTrulyEmpty(i.actual7)).length, 
   [indents]);
   const historyCount = useMemo(() => 
-    indents.filter((i) => !isTrulyEmpty(i.plannedAK) && !isTrulyEmpty(i.actualAL)).length, 
+    indents.filter((i) => !isTrulyEmpty(i.actual7)).length, 
   [indents]);
 
   // Persist filters to localStorage whenever they change
@@ -561,6 +595,7 @@ export const CrossCheckPage: React.FC = () => {
     remarks: "Remarks",
     traderName: "Trader Name",
     liftingDate: "Lifting Date",
+    liftingQty: "Lifting Qty",
   };
 
   const toggleColumn = (column: keyof ColumnVisibility) => {
@@ -609,13 +644,17 @@ export const CrossCheckPage: React.FC = () => {
     setReceiveData({
       receivedQty: indent.liftingData?.qty || "",
       difference: calculateDifference(indent.liftingData?.qty || "", indent),
-      receiveRemarks: indent.receiveRemarks || "",
+      receiveRemarks: "", // Ensure this is empty by default
+      receiverName: "",
     });
     setShowModal(true);
   };
 
   const handleSubmitReceive = async () => {
-    if (!selectedIndent || !receiveData.receivedQty.trim()) return;
+    if (!selectedIndent || !receiveData.receivedQty.trim() || !receiveData.receiverName) {
+      if (!receiveData.receiverName) setErrorMessage("Please select a Receiver Name");
+      return;
+    }
 
     setIsSubmitting(true);
     setErrorMessage("");
@@ -625,12 +664,14 @@ export const CrossCheckPage: React.FC = () => {
       receiveData.difference === "0" ? "All Okay" : "Not Okay";
 
     const updateData = {
-      actualAL: now,
+      actual7: now, // BD column
+      actualAL: now, // AL column (for compatibility)
       receivedQty: receiveData.receivedQty,
       difference: receiveData.difference,
       receiveRemarks: receiveData.receiveRemarks,
       receiveStatus,
       shopName: selectedIndent.shopName,
+      receiverName: receiveData.receiverName,
       isReceived: true,
     };
 
@@ -660,7 +701,7 @@ export const CrossCheckPage: React.FC = () => {
       
       setShowModal(false);
       setSelectedIndent(null);
-      setReceiveData({ receivedQty: "", difference: "", receiveRemarks: "" });
+      setReceiveData({ receivedQty: "", difference: "", receiveRemarks: "", receiverName: "" });
       
       window.location.reload();
     } catch (error: any) {
@@ -1037,6 +1078,11 @@ export const CrossCheckPage: React.FC = () => {
                       Lifting Date
                     </th>
                   )}
+                  {columnVisibility.liftingQty && (
+                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
+                      Lifting Qty
+                    </th>
+                  )}
                   {columnVisibility.itemName && (
                     <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
                       Item
@@ -1108,7 +1154,7 @@ export const CrossCheckPage: React.FC = () => {
                   {new Date(indent.orderDate).toLocaleDateString()}
                 </div>
               </div>
-              {activeTab === "pending" && isTrulyEmpty(indent.actualAL) && (
+              {activeTab === "pending" && isTrulyEmpty(indent.actual7) && (
                 <button
                   onClick={() => handleCrossCheck(indent)}
                   className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-purple-600 rounded-lg hover:bg-purple-700"
@@ -1131,6 +1177,10 @@ export const CrossCheckPage: React.FC = () => {
               <div>
                 <span className="text-xs text-gray-500">Lifting Date</span>
                 <div>{formatDateOnly(indent.liftingDate || indent.actualAF)}</div>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 font-semibold text-blue-600">Lifting Qty</span>
+                <div className="font-semibold text-blue-600">{indent.liftingData?.qty || "-"}</div>
               </div>
               <div>
                 <span className="text-xs text-gray-500">Item</span>
@@ -1297,6 +1347,23 @@ export const CrossCheckPage: React.FC = () => {
                     className="p-3 mt-1 w-full bg-gray-50 rounded-lg border"
                   />
                 </div>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block mb-1 text-sm font-medium text-gray-700">
+                  Receiver Name <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={receiveData.receiverName}
+                  onChange={(e) => setReceiveData(prev => ({ ...prev, receiverName: e.target.value }))}
+                  className="p-3 w-full rounded-lg border focus:ring-2 focus:ring-purple-500"
+                  required
+                >
+                  <option value="">Select Receiver</option>
+                  {receiverNames.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
               </div>
 
               <div>

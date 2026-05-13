@@ -47,6 +47,8 @@ interface POIndentItem {
   reorderQuantityBox: number;
   shopName: string;
   orderBy: string;
+  closingStockBottle?: number;
+  closingStockInBox?: number;
   shopManagerStatus?: string;
   remarks?: string;
   approvalDate?: string;
@@ -79,7 +81,6 @@ interface ColumnVisibility {
   maxLevel: boolean;
   closingStock: boolean;
   reorderQuantityPcs: boolean;
-  approved: boolean;
   traderName: boolean;
   sizeML: boolean;
   reorderQuantityBox: boolean;
@@ -506,18 +507,6 @@ const TableRow: React.FC<TableRowProps> = ({
           : formatNumber(indent.reorderQuantityPcs)}
       </td>
     )}
-    {columnVisibility.approved && (
-      <td className="px-6 py-4">
-        <span
-          className={`px-2 py-1 text-xs rounded-full ${indent.approved === "Yes"
-            ? "bg-green-100 text-green-800"
-            : "bg-yellow-100 text-yellow-800"
-            }`}
-        >
-          {indent.approved}
-        </span>
-      </td>
-    )}
     {columnVisibility.traderName && (
       <td className="px-6 py-4 min-w-[150px]">{indent.traderName}</td>
     )}
@@ -542,11 +531,9 @@ const TableRow: React.FC<TableRowProps> = ({
         </span>
       </td>
     )}
-    {columnVisibility.remarks && (
+    {columnVisibility.remarks && activeTab === "history" && (
       <td className="px-6 py-4 min-w-[200px]">
-        {activeTab === "history" 
-          ? (indent.remarksFrontend || indent.remarks || "-") 
-          : (indent.remarks || "-")}
+        {indent.remarksFrontend || indent.remarks || "-"}
       </td>
     )}
   </tr>
@@ -562,31 +549,6 @@ export const PurchaseOrderPage: React.FC = () => {
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [processedIndentNumbers, setProcessedIndentNumbers] = useState<Set<string>>(new Set());
   
-  // WhatsApp Workflow States
-  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
-  const [generatedWorkflowLinks, setGeneratedWorkflowLinks] = useState<{
-    poNumber: string;
-    poCopyLink: string;
-    traderLink: string;
-    transporterLink: string;
-    traderMsg: string;
-    transporterMsg: string;
-    receiverMsg: string;
-    traderPhone: string;
-    transporterPhone: string;
-    receiverPhone: string;
-  } | null>(null);
-  
-  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState<{trader: boolean, transporter: boolean, receiver: boolean}>({
-    trader: false,
-    transporter: false,
-    receiver: false
-  });
-  const [whatsAppStatus, setWhatsAppStatus] = useState<{trader: string | null, transporter: string | null, receiver: string | null}>({
-    trader: null,
-    transporter: null,
-    receiver: null
-  });
   const [sentPickupQtyLinks, setSentPickupQtyLinks] = useState<Set<string>>(() => {
     const saved = localStorage.getItem('sent_pickup_qty_links');
     return saved ? new Set(JSON.parse(saved)) : new Set();
@@ -609,7 +571,6 @@ export const PurchaseOrderPage: React.FC = () => {
     maxLevel: true,
     closingStock: true,
     reorderQuantityPcs: true,
-    approved: true,
     traderName: true,
     sizeML: true,
     reorderQuantityBox: true,
@@ -804,10 +765,11 @@ export const PurchaseOrderPage: React.FC = () => {
     try {
       const poNumberForSubmit = getNextPONumber();
       let poCopyLink = "";
+      let receiverSlipLink = "";
 
-      // 1. Generate PDF if possible
+      // 1. Generate PDFs (Parallel)
       const tradeName = selectedIndent.traderName;
-      const poData = {
+      const basePoData = {
         poNumber: poNumberForSubmit,
         companyName,
         tradeName,
@@ -818,77 +780,76 @@ export const PurchaseOrderPage: React.FC = () => {
           reorderQuantityPcs: (i.reorderQuantityPcs || 0).toString(),
           reorderQuantityBox: (i.reorderQuantityBox || 0).toString(),
           sizeML: (i.sizeML || 0).toString(),
-          closingStockPcs: (i.closingStock || 0).toString(),
-          closingStockBox: (i.reorderQuantityBox
-            ? Math.round((i.closingStock || 0) / (i.bottlesPerCase || 1)).toString()
-            : "0"),
+          closingStockPcs: (i.closingStockBottle || 0).toString(),
+          closingStockBox: (i.closingStockInBox || 0).toString(),
         })),
         remarks: remarks.trim() || "Generated via system",
       };
 
       try {
-        poCopyLink = await generatePOPDF(poData);
-        if (poCopyLink && poCopyLink.includes("uc?export=download&id=")) {
-          const fileId = poCopyLink.split("id=")[1];
-          poCopyLink = `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
-        }
-        console.log("✅ PDF generated and uploaded, viewUrl:", poCopyLink);
+        const [vendorUrl, receiverUrl] = await Promise.all([
+          generatePOPDF({ ...basePoData, type: 'vendor' }),
+          generatePOPDF({ ...basePoData, type: 'receiver' })
+        ]);
+
+        const processLink = (link: string) => {
+          if (link && link.includes("uc?export=download&id=")) {
+            const fileId = link.split("id=")[1];
+            return `https://drive.google.com/file/d/${fileId}/view?usp=sharing`;
+          }
+          return link;
+        };
+
+        poCopyLink = processLink(vendorUrl);
+        receiverSlipLink = processLink(receiverUrl);
+        
+        console.log("✅ PDFs generated and uploaded", { poCopyLink, receiverSlipLink });
       } catch (error) {
-        console.error("Error generating PDF:", error);
+        console.error("Error generating PDFs:", error);
       }
+
+      const currentIndentNo = (selectedIndent.indentNumber || "").trim();
+      const currentShopName = (selectedIndent.shopName || "").trim();
+      console.log("🔗 PDFs generated and uploaded", { poCopyLink, receiverSlipLink });
 
       // 2. Prepare common updates
       const currentTime = new Date().toISOString();
       const currentDate = formatTimestamp(new Date());
 
-      // === Vendor Master Phone Lookup ===
+      // ... existing phone lookup logic ...
       const traderNameKey = selectedIndent.traderName || "";
       const transporterNameKey = transporterName.trim();
       
-      // Find matching entry by trader name
       const vendorEntry = vendorMasterData.find(
         (v) => v.traderName.toLowerCase() === traderNameKey.toLowerCase()
       );
-      // Find transporter phone by transporter name match
       const transporterEntry = vendorMasterData.find(
         (v) => v.transporterName.toLowerCase() === transporterNameKey.toLowerCase()
       );
-      // Find receiver phone by receiver manager name match
       const currentReceiverManager = (receiverManager || selectedIndent.receiverManager || "").trim();
       const receiverEntry = vendorMasterData.find(
         (v) => v.receiverName.toLowerCase() === currentReceiverManager.toLowerCase()
       );
 
-      // --- PO Sheet Auto-fill Logic (Robust Lookup) ---
-      const currentIndentNo = (selectedIndent.indentNumber || "").trim();
-      const currentShopName = (selectedIndent.shopName || "").trim();
-      
       const findPOContact = (nameKey: string, role: 'trader' | 'transporter' | 'receiver') => {
         const normalizedName = nameKey.toLowerCase().trim();
         if (!normalizedName) return null;
-
-        // Try exact match with Indent Number first
         let match = [...poContactData].reverse().find(p => 
           p.indentNumber.trim() === currentIndentNo && 
           p.shopName.trim() === currentShopName && 
           (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
         );
-
-        // If no exact indent match, try latest match by Shop + Name
         if (!match) {
           match = [...poContactData].reverse().find(p => 
             p.shopName.trim() === currentShopName && 
             (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
           );
         }
-        
-        // If still no match, try match by Name only (latest globally)
         if (!match) {
           match = [...poContactData].reverse().find(p => 
             (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
           );
         }
-
         return match;
       };
 
@@ -911,13 +872,14 @@ export const PurchaseOrderPage: React.FC = () => {
           actualTimestamp2: currentDate,
           actualTimestamp3: currentDate,
           poCopyLink: poCopyLink,
+          receiverSlipLink: receiverSlipLink,
+          liftingFormLink: `${window.location.origin}/public/get-lifting?token=${btoa(item.indentNumber)}`,
           remarksFrontend: remarks.trim() || "",
           remarks: remarks.trim() || item.remarks || "",
-          poQty: item.reorderQuantityPcs,
+          poQty: item.reorderQuantityPcs || 0,
           isPO: true,
           shopName: item.shopName,
-          plannedAE: currentDate, // Set so item appears in Get Lifting pending tab
-          // Fields for PO Sheet insertion
+          plannedAE: currentDate,
           traderName: item.traderName || item.partyName || "",
           skuCode: item.skuCode || "",
           traderPhone: autoTraderPhone,
@@ -940,8 +902,12 @@ export const PurchaseOrderPage: React.FC = () => {
       });
 
       const updateResults = await Promise.all(updatePromises);
+      
+      // === IMMEDIATE FEEDBACK ===
+      setShowSuccessAnimation(true);
+      setTimeout(() => setShowSuccessAnimation(false), 3000);
 
-      // 4. Update UI state only after all backend updates succeed
+      // 4. Update UI state
       setIndents((prev) =>
         prev.map((indent) => {
           const result = updateResults.find((r) => r.id === indent.id);
@@ -949,7 +915,6 @@ export const PurchaseOrderPage: React.FC = () => {
         })
       );
 
-      // Add the processed indent numbers to the local set to ensure immediate UI update
       setProcessedIndentNumbers((prev) => {
         const next = new Set(prev);
         items.forEach((item) => next.add(item.indentNumber));
@@ -959,113 +924,91 @@ export const PurchaseOrderPage: React.FC = () => {
       setShowModal(false);
       setSelectedIndent(null);
 
-      // Generate Secure Workflow Links
-      const appUrl = window.location.origin;
-      const secureToken = btoa(`${poNumberForSubmit}-${Date.now()}`);
-      
-      const traderLink = selectedIndent.traderVerificationLink || `${appUrl}/public/trader-form?poId=${poNumberForSubmit}&token=${secureToken}`;
-      
-      // === WhatsApp Messages with PO slip link ===
-      const poImageLine = poCopyLink ? `\n📎 PO Slip: ${poCopyLink}` : "";
+      // Define a base link for WhatsApp using the first item
+      const baseLiftingLink = `${window.location.origin}/public/get-lifting?token=${btoa(items[0]?.indentNumber || "")}`;
 
-      // Trader: PO slip + acceptance question
-      const traderMsg = `🛒 *Purchase Order: ${poNumberForSubmit}*\n` +
-        `Company: ${companyName}\n` +
-        `Trade Name: ${traderNameKey}\n` +
-        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
-        `Items: ${items.length} SKUs${poImageLine}\n\n` +
-        `📝 *Verification Form:* ${traderLink}\n\n` +
-        `✅ *Do you ACCEPT this order? Please confirm YES or NO.*`;
+      // --- Background tasks (Re-fetch & WhatsApp) ---
+      (async () => {
+        console.log("🔄 Background tasks starting...");
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        const [freshIndents, freshPOContacts, freshVerificationLinks] = await Promise.all([
+          indentService.getIndents(),
+          indentService.getPOContactData(),
+          indentService.getTransporterVerificationLinks()
+        ]);
+        
+        setIndents(freshIndents);
+        setPoContactData(freshPOContacts);
+        setTransporterVerificationLinks(freshVerificationLinks);
 
-      // Receiver: item-wise details
-      const itemDetails = items.map((i, idx) =>
-        `${idx + 1}. ${i.itemName}\n` +
-        `   Closing Qty: ${Math.round(i.closingStock || 0)} Pcs | ${Math.round((i.closingStock || 0) / (i.bottlesPerCase || 1))} Box\n` +
-        `   Order Qty: ${Math.round(i.reorderQuantityPcs || 0)} Pcs | ${Math.round(i.reorderQuantityBox || 0)} Box`
-      ).join("\n\n");
+        const freshIndent = freshIndents.find(i => i.indentNumber === currentIndentNo && i.shopName === currentShopName);
+        const traderBKLink = freshIndent?.traderVerificationLink || "";
+        const transporterBKLink = freshIndent?.transporterVerificationLink || "";
 
-      const receiverMsg = `📬 *New Delivery Incoming: ${poNumberForSubmit}*\n` +
-        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
-        `From Trader: ${traderNameKey}\n\n` +
-        `*Items Detail:*\n${itemDetails}${poImageLine}\n\n` +
-        `Please be ready to receive and verify.`;
+        const findPOContactFresh = (nameKey: string, role: 'trader' | 'transporter' | 'receiver', data: POContactEntry[]) => {
+          const normalizedName = nameKey.toLowerCase().trim();
+          if (!normalizedName) return null;
+          return [...data].reverse().find(p => 
+            p.indentNumber.trim() === currentIndentNo && 
+            p.shopName.trim() === currentShopName && 
+            (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
+          );
+        };
 
-      // --- CRITICAL: Re-fetch PO Contact Data AND Verification Links AFTER submission ---
-      console.log("🔄 Re-fetching PO Contact data and Verification links...");
-      const [freshPOContacts, freshVerificationLinks] = await Promise.all([
-        indentService.getPOContactData(),
-        indentService.getTransporterVerificationLinks()
-      ]);
-      setPoContactData(freshPOContacts);
-      setTransporterVerificationLinks(freshVerificationLinks);
+        const freshTraderMatch = findPOContactFresh(traderNameKey, 'trader', freshPOContacts);
+        const freshTransporterMatch = findPOContactFresh(transporterNameKey, 'transporter', freshPOContacts);
+        const freshReceiverMatch = findPOContactFresh(currentReceiverManager, 'receiver', freshPOContacts);
 
-      // --- Re-run the lookup logic with fresh data ---
-      const findPOContactFresh = (nameKey: string, role: 'trader' | 'transporter' | 'receiver', data: POContactEntry[]) => {
-        const normalizedName = nameKey.toLowerCase().trim();
-        if (!normalizedName) return null;
-        return [...data].reverse().find(p => 
-          p.indentNumber.trim() === currentIndentNo && 
-          p.shopName.trim() === currentShopName && 
-          (role === 'trader' ? p.traderName : role === 'transporter' ? p.transporterName : p.receiverManager).toLowerCase().trim() === normalizedName
-        );
-      };
+        const finalTraderPhone = freshTraderMatch?.traderPhone || autoTraderPhone;
+        const finalTransporterPhone = freshTransporterMatch?.transporterPhone || autoTransporterPhone;
+        const finalReceiverPhone = freshReceiverMatch?.receiverPhone || autoReceiverPhone;
+        
+        const finalTraderLink = traderBKLink || `(Link not generated yet)`;
+        const finalTransporterLink = transporterBKLink || `(Link not generated yet)`;
+        
+        // WhatsApp logic with DIFFERENT links
+        const vendorSlipLine = poCopyLink ? `\n📎 PO Slip: ${poCopyLink}` : "";
+        const receiverSlipLine = receiverSlipLink ? `\n📎 PO Slip: ${receiverSlipLink}` : "";
 
-      const freshTraderMatch = findPOContactFresh(traderNameKey, 'trader', freshPOContacts);
-      const freshTransporterMatch = findPOContactFresh(transporterNameKey, 'transporter', freshPOContacts);
-      const freshReceiverMatch = findPOContactFresh(currentReceiverManager, 'receiver', freshPOContacts);
-      
-      const freshVerificationMatch = [...freshVerificationLinks].reverse().find(v => 
-        v.indentNumber.trim() === currentIndentNo && 
-        v.shopName.trim() === currentShopName
-      );
+        const traderMsg = `🛒 *Purchase Order: ${poNumberForSubmit}*\n` +
+          `Company: ${companyName}\n` +
+          `Trade Name: ${traderNameKey}\n` +
+          `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+          `Items: ${items.length} SKUs${vendorSlipLine}\n\n` +
+          `📝 *Verification Form:* ${finalTraderLink}\n\n` +
+          `✅ *Do you ACCEPT this order? Please confirm YES or NO.*`;
 
-      const finalTraderPhone = freshTraderMatch?.traderPhone || autoTraderPhone;
-      const finalTransporterPhone = freshTransporterMatch?.transporterPhone || autoTransporterPhone;
-      const finalReceiverPhone = freshReceiverMatch?.receiverPhone || autoReceiverPhone;
-      
-      const finalTransporterLink = selectedIndent.transporterVerificationLink || `${appUrl}/public/transporter-form?indent=${encodeURIComponent(currentIndentNo)}`;
-      const transporterLink = finalTransporterLink;
+        const transporterMsg = `🚛 *Pickup Assignment: ${poNumberForSubmit}*\n` +
+          `Transporter: ${transporterNameKey}\n` +
+          `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+          `Items: ${items.length} SKUs${vendorSlipLine}\n\n` +
+          `📝 *Verification Form:* ${finalTransporterLink}\n\n` +
+          `📦 *Get Lifting Form:* ${baseLiftingLink}\n\n` +
+          `*Note:* Once you submit the Verification form, you will receive the Pickup Quantity form link automatically.\n\n` +
+          `📦 *Did you PICK UP this order? Reply YES (picked) or NO (not picked).*`;
 
-      // Transporter: PO slip + pickup question
-      const transporterMsg = `🚛 *Pickup Assignment: ${poNumberForSubmit}*\n` +
-        `Transporter: ${transporterNameKey}\n` +
-        `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
-        `Items: ${items.length} SKUs${poImageLine}\n\n` +
-        `📝 *Verification Form:* ${transporterLink}\n\n` +
-        `*Note:* Once you submit the Verification form, you will receive the Pickup Quantity form link automatically.\n\n` +
-        `📦 *Did you PICK UP this order? Reply YES (picked) or NO (not picked).*`;
+        const itemDetails = items.map((i, idx) =>
+          `${idx + 1}. ${i.itemName}\n` +
+          `   Closing Stock: ${Math.round(i.closingStockBottle || 0)} Btl | ${Math.round(i.closingStockInBox || 0)} Box\n` +
+          `   Order Qty: ${Math.round(i.reorderQuantityPcs || 0)} Pcs | ${Math.round(i.reorderQuantityBox || 0)} Box`
+        ).join("\n\n");
 
-      console.log("📱 Final Receiver Phone for UI:", finalReceiverPhone);
+        const receiverMsg = `📬 *New Delivery Incoming: ${poNumberForSubmit}*\n` +
+          `Date: ${new Date().toLocaleDateString('en-IN')}\n` +
+          `From Trader: ${traderNameKey}\n\n` +
+          `*Items Detail:*\n${itemDetails}${receiverSlipLine}\n\n` +
+          `Please be ready to receive and verify.`;
 
-      setGeneratedWorkflowLinks({
-        poNumber: poNumberForSubmit,
-        poCopyLink,
-        traderLink,
-        transporterLink,
-        traderMsg,
-        transporterMsg,
-        receiverMsg,
-        traderPhone: finalTraderPhone,
-        transporterPhone: finalTransporterPhone,
-        receiverPhone: finalReceiverPhone,
-      });
-      
-      // Reset sending status
-      setWhatsAppStatus({ trader: null, transporter: null, receiver: null });
-      setIsSendingWhatsApp({ trader: false, transporter: false, receiver: false });
+        // Send messages...
+        if (finalTraderPhone) indentService.addToWhatsappSheet(finalTraderPhone, traderMsg);
+        if (finalTransporterPhone) indentService.addToWhatsappSheet(finalTransporterPhone, transporterMsg);
+        if (finalReceiverPhone) indentService.addToWhatsappSheet(finalReceiverPhone, receiverMsg);
+      })();
 
-      
-      setShowSuccessAnimation(true);
-      setTimeout(() => {
-        setShowSuccessAnimation(false);
-        setShowWhatsAppModal(true); // Show WhatsApp sharing modal after animation
-        setActiveTab("history");
-      }, 2500);
-
-    } catch (error) {
-      console.error("Error in PO submission:", error);
-      setErrorMessage("Failed to generate PO. Please try again.");
-      setTimeout(() => setErrorMessage(""), 5000);
+    } catch (err: any) {
+      console.error("Submit error:", err);
+      setErrorMessage("Failed to send PO. Please check console for details.");
     } finally {
       setIsSubmitting(false);
     }
@@ -1163,13 +1106,12 @@ export const PurchaseOrderPage: React.FC = () => {
                     {columnVisibility.maxLevel && <th className="px-6 py-3">Max</th>}
                     {columnVisibility.closingStock && <th className="px-6 py-3">Stock</th>}
                     {columnVisibility.reorderQuantityPcs && <th className="px-6 py-3">Qty (Pcs)</th>}
-                    {columnVisibility.approved && <th className="px-6 py-3">Approved</th>}
                     {columnVisibility.traderName && <th className="px-6 py-3">Trader</th>}
                     {columnVisibility.sizeML && <th className="px-6 py-3">Size</th>}
                     {columnVisibility.reorderQuantityBox && <th className="px-6 py-3">Box</th>}
                     {columnVisibility.shopName && <th className="px-6 py-3">Shop</th>}
                     {columnVisibility.status && <th className="px-6 py-3">Status</th>}
-                    {columnVisibility.remarks && <th className="px-6 py-3">Remarks</th>}
+                    {columnVisibility.remarks && activeTab === "history" && <th className="px-6 py-3">Remarks</th>}
                   </tr>
                 </thead>
                 <tbody key={activeTab} className="divide-y divide-gray-200">
@@ -1271,164 +1213,9 @@ export const PurchaseOrderPage: React.FC = () => {
 
       <SuccessAnimation
         visible={showSuccessAnimation}
-        message="PO Generated Successfully!"
+        message="PO Generated & Messages Queued!"
         onComplete={() => setShowSuccessAnimation(false)}
       />
-
-      {showWhatsAppModal && generatedWorkflowLinks && (() => {
-        const sendWhatsApp = async (
-          role: 'trader' | 'transporter' | 'receiver',
-          phone: string,
-          message: string,
-          imageUrl?: string
-        ) => {
-          if (!phone) return alert(`Please enter ${role} phone number (e.g. 919876543210)`);
-          
-          // Prepend 91 if it's a 10-digit number
-          let formattedPhone = phone.trim();
-          if (formattedPhone.length === 10) {
-            formattedPhone = '91' + formattedPhone;
-          }
-
-          setIsSendingWhatsApp(prev => ({ ...prev, [role]: true }));
-          
-          try {
-            // Use environment variables and proxy if on localhost
-            const productId = import.meta.env.VITE_MAYTAPI_PRODUCT_ID || '654f0c29-bfe7-42f2-b5a9-81638a716206';
-            const phoneId = import.meta.env.VITE_MAYTAPI_PHONE_ID || '102579';
-            const token = import.meta.env.VITE_MAYTAPI_TOKEN || '9fcce0ed-0e27-423f-946f-14141bc6589a';
-            
-            const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-            const baseUrl = isLocal ? '/maytapi' : 'https://api.maytapi.com';
-            const apiUrl = `${baseUrl}/api/${productId}/${phoneId}/sendMessage`;
-
-            let body: any;
-            if (imageUrl) {
-              // Using 'media' type as seen in WhatsappSendMessage.tsx
-              body = {
-                to_number: formattedPhone,
-                type: 'media',
-                message: imageUrl,
-                text: message
-              };
-            } else {
-              body = {
-                to_number: formattedPhone,
-                type: 'text',
-                message: message
-              };
-            }
-
-            const res = await fetch(apiUrl, {
-              method: 'POST',
-              headers: { 
-                'Content-Type': 'application/json',
-                'x-maytapi-key': token 
-              },
-              body: JSON.stringify(body),
-            });
-
-            const data = await res.json();
-            
-            if (data.success || data.status === 'success' || res.ok) {
-              setWhatsAppStatus(prev => ({ ...prev, [role]: 'Success' }));
-            } else {
-              setWhatsAppStatus(prev => ({ ...prev, [role]: 'Failed' }));
-              console.error(`WhatsApp send failed for ${role}:`, data);
-            }
-          } catch (error) {
-            console.error(`WhatsApp send error for ${role}:`, error);
-            setWhatsAppStatus(prev => ({ ...prev, [role]: 'Error' }));
-          } finally {
-            setIsSendingWhatsApp(prev => ({ ...prev, [role]: false }));
-          }
-        };
-
-        return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto">
-              <div className="p-6 border-b border-gray-200 bg-green-50">
-                <h3 className="text-xl font-bold text-green-800">✅ PO Generated Successfully!</h3>
-                <p className="text-sm text-green-600 mt-1">PO Number: <strong>{generatedWorkflowLinks.poNumber}</strong></p>
-                {generatedWorkflowLinks.poCopyLink && (
-                  <a href={generatedWorkflowLinks.poCopyLink} target="_blank" rel="noopener noreferrer"
-                    className="text-xs text-blue-600 underline mt-1 block">View PO Slip →</a>
-                )}
-              </div>
-
-              <div className="p-6 space-y-5">
-                <p className="text-sm text-gray-500">Send the PO slip with confirmation request to all parties via WhatsApp.</p>
-
-                {/* 1. Trader */}
-                <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
-                  <h4 className="font-bold text-blue-800 mb-1">1. 🛒 Trader Confirmation</h4>
-                  <p className="text-xs text-blue-600 mb-3 italic">Message: "Do you accept this order?"</p>
-                  <input type="text" placeholder="Trader WhatsApp No. (e.g. 919876543210)"
-                    value={generatedWorkflowLinks.traderPhone}
-                    onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? { ...prev, traderPhone: e.target.value } : null)}
-                    className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm mb-3"
-                  />
-                  <button
-                    onClick={() => sendWhatsApp('trader', generatedWorkflowLinks.traderPhone, generatedWorkflowLinks.traderMsg, generatedWorkflowLinks.poCopyLink || undefined)}
-                    disabled={isSendingWhatsApp.trader || whatsAppStatus.trader === 'Success'}
-                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600 transition disabled:opacity-50"
-                  >
-                    {isSendingWhatsApp.trader ? '⏳ Sending...' : whatsAppStatus.trader === 'Success' ? '✅ Sent Successfully' : '📤 Send to Trader'}
-                  </button>
-                  {whatsAppStatus.trader === 'Failed' && <p className="text-red-500 text-xs mt-1">❌ Failed. Check phone number format.</p>}
-                </div>
-
-                {/* 2. Transporter */}
-                <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl">
-                  <h4 className="font-bold text-orange-800 mb-1">2. 🚛 Transporter Pickup</h4>
-                  <p className="text-xs text-orange-600 mb-3 italic">Message: "Did you pick up or not?"</p>
-                  <input type="text" placeholder="Transporter WhatsApp No. (e.g. 919876543210)"
-                    value={generatedWorkflowLinks.transporterPhone}
-                    onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? { ...prev, transporterPhone: e.target.value } : null)}
-                    className="w-full px-3 py-2 border border-orange-300 rounded-lg focus:ring-2 focus:ring-orange-400 outline-none text-sm mb-3"
-                  />
-                  <button
-                    onClick={() => sendWhatsApp('transporter', generatedWorkflowLinks.transporterPhone, generatedWorkflowLinks.transporterMsg, generatedWorkflowLinks.poCopyLink || undefined)}
-                    disabled={isSendingWhatsApp.transporter || whatsAppStatus.transporter === 'Success'}
-                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-orange-500 text-white rounded-lg font-bold hover:bg-orange-600 transition disabled:opacity-50"
-                  >
-                    {isSendingWhatsApp.transporter ? '⏳ Sending...' : whatsAppStatus.transporter === 'Success' ? '✅ Sent Successfully' : '📤 Send to Transporter'}
-                  </button>
-                  {whatsAppStatus.transporter === 'Failed' && <p className="text-red-500 text-xs mt-1">❌ Failed. Check phone number format.</p>}
-                </div>
-
-                {/* 3. Receiver */}
-                <div className="bg-purple-50 border border-purple-200 p-4 rounded-xl">
-                  <h4 className="font-bold text-purple-800 mb-1">3. 📬 Receiver Notification</h4>
-                  <p className="text-xs text-purple-600 mb-3 italic">Message: Item details with closing & order qty</p>
-                  <input type="text" placeholder="Receiver WhatsApp No. (e.g. 919876543210)"
-                    value={generatedWorkflowLinks.receiverPhone}
-                    onChange={(e) => setGeneratedWorkflowLinks(prev => prev ? { ...prev, receiverPhone: e.target.value } : null)}
-                    className="w-full px-3 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-400 outline-none text-sm mb-3"
-                  />
-                  <button
-                    onClick={() => sendWhatsApp('receiver', generatedWorkflowLinks.receiverPhone, generatedWorkflowLinks.receiverMsg, generatedWorkflowLinks.poCopyLink || undefined)}
-                    disabled={isSendingWhatsApp.receiver || whatsAppStatus.receiver === 'Success'}
-                    className="flex items-center justify-center gap-2 w-full py-2.5 bg-purple-500 text-white rounded-lg font-bold hover:bg-purple-600 transition disabled:opacity-50"
-                  >
-                    {isSendingWhatsApp.receiver ? '⏳ Sending...' : whatsAppStatus.receiver === 'Success' ? '✅ Sent Successfully' : '📤 Send to Receiver'}
-                  </button>
-                  {whatsAppStatus.receiver === 'Failed' && <p className="text-red-500 text-xs mt-1">❌ Failed. Check phone number format.</p>}
-                </div>
-              </div>
-
-              <div className="p-4 border-t border-gray-200 bg-gray-50 flex justify-end">
-                <button onClick={() => setShowWhatsAppModal(false)}
-                  className="px-6 py-2 bg-gray-900 text-white rounded-lg font-bold hover:bg-gray-800 transition">
-                  Done
-                </button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-
     </div>
   );
 };

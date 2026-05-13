@@ -22,6 +22,7 @@ interface POData {
     closingStockBox?: string;
   }>;
   remarks?: string;
+  type?: 'receiver' | 'vendor'; // 'receiver' for manager, 'vendor' for trader/transporter
 }
 
 // Helper to convert blob to base64
@@ -178,53 +179,77 @@ const generatePOImage = async (poData: POData): Promise<Blob> => {
   ctx.fillStyle = "#e6e6e6";
   ctx.fillRect(177, y, 2126, 95); // Header background
   
+  // Helper for formatting numbers to max 2 decimal places
+  const formatNum = (val: string | number | undefined): string => {
+    if (val === undefined || val === null || val === "") return "0";
+    const n = Number(val);
+    if (isNaN(n)) return String(val);
+    // If it's an integer, return as is. If decimal, limit to 2 places.
+    return Number.isInteger(n) ? n.toString() : n.toFixed(2);
+  };
+
   ctx.fillStyle = "black";
-  ctx.font = "bold 38px Arial, sans-serif";
-  ctx.fillText("S.NO", 236, y + 60);
-  ctx.fillText("ITEM NAME", 531, y + 60);
-  ctx.fillText("QTY(PC)", 1298, y + 60);
-  ctx.fillText("QTY(BOX)", 1593, y + 60);
-  ctx.fillText("SIZE (ML)", 1888, y + 60);
+  ctx.font = "bold 32px Arial, sans-serif";
+  
+  const isReceiver = poData.type === 'receiver';
+
+  if (isReceiver) {
+    ctx.font = "bold 28px Arial, sans-serif";
+    ctx.fillText("S.NO", 197, y + 60);
+    ctx.fillText("ITEM NAME", 413, y + 60);
+    ctx.fillText("CLOSING(BTL)", 944, y + 60);
+    ctx.fillText("CLOSING(BOX)", 1215, y + 60);
+    ctx.fillText("ORDER(BTL)", 1487, y + 60);
+    ctx.fillText("ORDER(BOX)", 1758, y + 60);
+    ctx.fillText("SIZE (ML)", 2030, y + 60);
+  } else {
+    // Simplified for Trader/Transporter (Vendor) - Exactly as Image 1
+    ctx.font = "bold 38px Arial, sans-serif";
+    ctx.fillText("S.NO", 236, y + 60);
+    ctx.fillText("ITEM NAME", 531, y + 60);
+    ctx.fillText("QTY(PC)", 1298, y + 60);
+    ctx.fillText("QTY(BOX)", 1593, y + 60);
+    ctx.fillText("SIZE (ML)", 1888, y + 60);
+  }
   
   // === TABLE BODY ===
   y = 1158; // ~98mm from top
-  ctx.font = "38px Arial, sans-serif";
+  ctx.font = isReceiver ? "30px Arial, sans-serif" : "38px Arial, sans-serif";
   
   poData.items.forEach((item) => {
-    const rowHeight = 118; // Base row height
+    const rowHeight = 118;
     
-    // Wrap text for item name and qty box
-    const itemNameLines = wrapText(ctx, item.itemName, 708, 38);
-    const qtyBoxLines = wrapText(ctx, item.reorderQuantityBox || "0", 236, 38);
+    // Wrap widths based on type
+    const itemWidth = isReceiver ? 500 : 708;
+    const boxWidth = isReceiver ? 200 : 236;
+    const fontSize = isReceiver ? 30 : 38;
+
+    const itemNameLines = wrapText(ctx, item.itemName, itemWidth, fontSize);
+    const qtyBoxLines = wrapText(ctx, formatNum(item.reorderQuantityBox), boxWidth, fontSize);
     
-    const itemNameHeight = itemNameLines.length * 47;
-    const qtyBoxHeight = qtyBoxLines.length * 47;
+    const itemNameHeight = itemNameLines.length * (fontSize + 8);
+    const qtyBoxHeight = qtyBoxLines.length * (fontSize + 8);
     const actualRowHeight = Math.max(rowHeight, itemNameHeight, qtyBoxHeight);
     
-    // Draw row background
     ctx.fillStyle = lightPink;
     ctx.fillRect(177, y - 59, 2126, actualRowHeight);
-    
     ctx.fillStyle = "black";
     
-    // S.No
-    ctx.fillText(item.indentNumber, 236, y);
-    
-    // Item Name (wrapped)
-    itemNameLines.forEach((line, i) => {
-      ctx.fillText(line, 531, y + (i * 47));
-    });
-    
-    // QTY(PC)
-    ctx.fillText(item.reorderQuantityPcs, 1357, y);
-    
-    // QTY(BOX) (wrapped)
-    qtyBoxLines.forEach((line, i) => {
-      ctx.fillText(line, 1652, y + (i * 47));
-    });
-    
-    // SIZE(ML)
-    ctx.fillText(item.sizeML, 1947, y);
+    if (isReceiver) {
+      ctx.fillText(item.indentNumber, 197, y);
+      itemNameLines.forEach((line, i) => ctx.fillText(line, 413, y + (i * 40)));
+      ctx.fillText(formatNum(item.closingStockPcs), 1000, y);
+      ctx.fillText(formatNum(item.closingStockBox), 1270, y);
+      ctx.fillText(formatNum(item.reorderQuantityPcs), 1545, y);
+      qtyBoxLines.forEach((line, i) => ctx.fillText(line, 1810, y + (i * 40)));
+      ctx.fillText(formatNum(item.sizeML), 2085, y);
+    } else {
+      ctx.fillText(item.indentNumber, 236, y);
+      itemNameLines.forEach((line, i) => ctx.fillText(line, 531, y + (i * 47)));
+      ctx.fillText(formatNum(item.reorderQuantityPcs), 1357, y);
+      qtyBoxLines.forEach((line, i) => ctx.fillText(line, 1652, y + (i * 47)));
+      ctx.fillText(formatNum(item.sizeML), 1947, y);
+    }
     
     y += actualRowHeight + 24;
   });

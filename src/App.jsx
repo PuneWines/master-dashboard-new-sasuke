@@ -176,6 +176,7 @@ function App() {
           {/* Public Workflow Forms (Purchase Management) */}
           <Route path="/public/trader-form" element={<TraderForm />} />
           <Route path="/public/transporter-form" element={<TransporterForm />} />
+          <Route path="/public/get-lifting" element={<PurchaseLifting />} />
 
           {/* ════════════════════════════════════════
               MASTER DASHBOARD

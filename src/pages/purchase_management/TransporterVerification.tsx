@@ -1,125 +1,181 @@
-import React, { useState, useEffect } from 'react';
-import { Truck, MapPin, Clock, Search, CheckCircle, Navigation, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Clock, FileText, Truck, CheckCircle, Clock4 } from 'lucide-react';
+import { format } from 'date-fns';
 import { indentService } from '../../services/purchase_management/indentService';
 
 export const TransporterVerification: React.FC = () => {
-  const [tasks, setTasks] = useState<any[]>([]);
+  const [indents, setIndents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [submitting, setSubmitting] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchTasks = async () => {
+    const fetchIndents = async () => {
       try {
         setLoading(true);
         const data = await indentService.getIndents();
-        // Mock filter for items ready for pickup
-        const pickupReady = data.filter(i => i.approved === "Yes" || i.status === "approved").slice(0, 5);
-        setTasks(pickupReady);
+        setIndents(data);
       } catch (err) {
-        console.error("Failed to fetch transporter tasks", err);
+        console.error("Failed to fetch indents for transporter verification", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchTasks();
+    fetchIndents();
   }, []);
 
-  const handlePickup = async (id: string) => {
-    setSubmitting(id);
+  const hasValue = (s?: string) => 
+    typeof s === "string" && s.trim() !== "" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined";
+
+  const filteredIndents = useMemo(() => {
+    return indents.filter(item => {
+      // Visibility Condition: Planned 4 and Actual 4 must be NOT NULL (Same as Trader)
+      const isVisible = hasValue(item.planned4) && hasValue(item.actual4);
+      if (!isVisible) return false;
+
+      const searchLower = searchTerm.toLowerCase();
+      return (
+        item.indentNumber?.toLowerCase().includes(searchLower) ||
+        item.itemName?.toLowerCase().includes(searchLower) ||
+        item.brandName?.toLowerCase().includes(searchLower) ||
+        item.traderName?.toLowerCase().includes(searchLower) ||
+        item.partyName?.toLowerCase().includes(searchLower) ||
+        item.shopName?.toLowerCase().includes(searchLower)
+      );
+    });
+  }, [indents, searchTerm]);
+
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr || dateStr.trim() === "" || dateStr.toLowerCase() === "null") return "-";
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      alert(`Pickup confirmed for order ${id}.`);
-      setTasks(prev => prev.filter(t => t.id !== id));
-    } finally {
-      setSubmitting(null);
+      const date = new Date(dateStr);
+      if (!isNaN(date.getTime())) {
+        return format(date, 'dd/MM/yyyy');
+      }
+      return dateStr;
+    } catch {
+      return dateStr;
     }
   };
 
-  const filteredTasks = tasks.filter(t => 
-    t.shopName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    t.indentNumber?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const formatNum = (val: any) => {
+    if (val === undefined || val === null || val === "" || String(val).toLowerCase() === "null") return "-";
+    const num = Number(val);
+    return isNaN(num) ? val : num.toFixed(2);
+  };
 
   return (
-    <div className="p-6 bg-slate-50 min-h-screen w-full lg:w-[calc(100vw-280px)]">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-slate-900">Transporter Verification</h1>
-        <p className="text-slate-500 mt-1">Manage and verify vehicle pickup status for orders.</p>
-      </div>
-
-      {/* Search Bar */}
-      <div className="mb-8 relative max-w-xl">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-        <input
-          type="text"
-          placeholder="Search by Shop, Order ID or Transporter..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm transition-all text-slate-700"
-        />
+    <div className="p-4 md:p-8 bg-slate-50 min-h-screen w-full lg:w-[calc(100vw-280px)]">
+      {/* Header Section */}
+      <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Transporter Verification</h1>
+          <p className="text-slate-500 mt-1 flex items-center gap-2">
+            <Clock4 className="w-4 h-4" />
+            Monitoring vehicle pickup and logistics status.
+          </p>
+        </div>
+        
+        <div className="relative group">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />
+          <input
+            type="text"
+            placeholder="Search all columns..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full md:w-80 pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none shadow-sm transition-all text-slate-600"
+          />
+        </div>
       </div>
 
       {loading ? (
-        <div className="flex justify-center p-20">
-          <div className="animate-spin h-10 w-10 border-4 border-indigo-600 border-t-transparent rounded-full"></div>
+        <div className="flex flex-col items-center justify-center p-20 bg-white rounded-3xl border border-slate-100 shadow-sm">
+          <div className="animate-spin h-12 w-12 border-4 border-indigo-600 border-t-transparent rounded-full mb-4"></div>
+          <p className="text-slate-500 font-medium animate-pulse">Fetching latest data...</p>
         </div>
-      ) : filteredTasks.length === 0 ? (
+      ) : filteredIndents.length === 0 ? (
         <div className="bg-white rounded-3xl p-16 text-center border border-slate-100 shadow-sm">
           <div className="bg-indigo-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Truck className="text-indigo-400 w-10 h-10" />
+            <Truck className="text-indigo-300 w-10 h-10" />
           </div>
-          <h3 className="text-2xl font-bold text-slate-900">No Pickups Assigned</h3>
-          <p className="text-slate-500 mt-2 max-w-md mx-auto">There are currently no orders assigned for pickup in your region.</p>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">No Records Found</h3>
+          <p className="text-slate-500 max-w-sm mx-auto">
+            Currently no orders match the required verification criteria (Planned 4 & Actual 4 visibility).
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredTasks.map(task => (
-            <div key={task.id} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden hover:shadow-xl transition-all duration-300 group">
-              <div className="p-6">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="bg-indigo-600 p-3 rounded-2xl text-white group-hover:scale-110 transition-transform">
-                    <Truck className="w-6 h-6" />
-                  </div>
-                  <span className="bg-amber-100 text-amber-700 text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full border border-amber-200">
-                    Assigned for Pickup
-                  </span>
-                </div>
-
-                <h3 className="text-xl font-bold text-slate-900 mb-1">{task.shopName}</h3>
-                <div className="space-y-2 mb-6">
-                  <div className="flex items-center gap-2 text-sm text-slate-600">
-                    <MapPin className="w-4 h-4 text-slate-400" />
-                    <span>Pune, MH - Distribution Center</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-slate-600">
-                    <Clock className="w-4 h-4 text-slate-400" />
-                    <span>Pickup Window: Today, 2:00 PM - 5:00 PM</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-slate-600 font-mono">
-                    <Navigation className="w-4 h-4 text-slate-400" />
-                    <span>{task.indentNumber}</span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={() => handlePickup(task.id)}
-                    disabled={!!submitting}
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-2xl shadow-lg shadow-indigo-200 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <CheckCircle className="w-5 h-5" />
-                    {submitting === task.id ? 'Updating...' : 'Confirm Pickup'}
-                  </button>
-                </div>
-              </div>
-              
-              <div className="bg-slate-50 px-6 py-4 flex items-center gap-3 border-t border-slate-100">
-                <AlertTriangle className="w-4 h-4 text-amber-500" />
-                <span className="text-xs font-bold text-slate-500">Contact trader if delayed more than 30 mins.</span>
-              </div>
-            </div>
-          ))}
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-xl shadow-slate-200/50 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/80 border-b border-slate-100">
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Indent #</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Appr. Date</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Item</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Brand</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">MOQ</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Max</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Stock</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Qty (Pcs)</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Trader</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Size</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">Box</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Shop</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Trader Status</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider whitespace-nowrap">Dispatch Date</th>
+                  <th className="px-4 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Remarks</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredIndents.map((item, idx) => (
+                  <tr key={`${item.id}-${idx}`} className="hover:bg-slate-50/50 transition-colors group">
+                    <td className="px-4 py-4 font-bold text-indigo-600 whitespace-nowrap">{item.indentNumber}</td>
+                    <td className="px-4 py-4 text-slate-600 whitespace-nowrap">{formatDate(item.approvalDate)}</td>
+                    <td className="px-4 py-4 text-slate-500 font-mono text-xs">{item.skuCode}</td>
+                    <td className="px-4 py-4">
+                      <div className="font-semibold text-slate-900">{item.itemName}</div>
+                    </td>
+                    <td className="px-4 py-4 text-slate-600">{item.brandName}</td>
+                    <td className="px-4 py-4 text-center font-medium text-slate-700">{formatNum(item.moq)}</td>
+                    <td className="px-4 py-4 text-center font-medium text-slate-700">{formatNum(item.maxLevel)}</td>
+                    <td className="px-4 py-4 text-center">
+                      <span className={`px-2 py-1 rounded-lg text-xs font-bold ${Number(item.closingStock) < Number(item.moq) ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-700'}`}>
+                        {formatNum(item.closingStock)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-center font-bold text-slate-900 bg-slate-50/30">{formatNum(item.reorderQuantityPcs)}</td>
+                    <td className="px-4 py-4 font-medium text-slate-700">{item.traderName || item.partyName}</td>
+                    <td className="px-4 py-4 text-slate-500">{item.sizeML} ml</td>
+                    <td className="px-4 py-4 text-center font-medium text-indigo-700">{formatNum(item.reorderQuantityBox)}</td>
+                    <td className="px-4 py-4 font-medium text-slate-900 whitespace-nowrap">{item.shopName}</td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                        item.transporterStatus === 'Accepted' ? 'bg-emerald-100 text-emerald-700' : 
+                        item.transporterStatus === 'Rejected' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {item.transporterStatus || 'Pending'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4">
+                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                        item.traderStatus === 'Accepted' ? 'bg-blue-100 text-blue-700' : 
+                        item.traderStatus === 'Rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                      }`}>
+                        {item.traderStatus || 'Waiting'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-4 text-slate-600 whitespace-nowrap">
+                      {formatDate(item.dispatchDate)}
+                    </td>
+                    <td className="px-4 py-4 text-slate-500 max-w-xs truncate" title={item.transporterRemarks}>
+                      {item.transporterRemarks || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

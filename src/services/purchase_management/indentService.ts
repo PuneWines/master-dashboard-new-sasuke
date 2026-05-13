@@ -156,8 +156,11 @@ export interface IndentItem {
   actualAF?: string;
   plannedAK?: string; // Planned 5 (AK column) - for cross-check
   actualAL?: string; // Actual AL (AL column) - for cross-check
-  // NEW FIELD: PO Date from Column X (Actual 3)
-  poDate?: string;
+  timestamp?: string; // Column A
+  poDate?: string; // Column X
+  closingStockBottle?: number; // Column N
+  receiverSlipLink?: string; // Receive PO Copy col L
+  liftingFormLink?: string; // Get Lifting Form Link col N
   liftingData?: {
     transportCopy?: string;
     billCopy?: string;
@@ -175,6 +178,18 @@ export interface IndentItem {
   traderPhone?: string;
   transporterPhone?: string;
   receiverPhone?: string;
+  traderStatus?: string; // From column AJ
+  dispatchDate?: string; // From column AL
+  remarksTrader?: string; // From column AM
+  planned4?: string; // From column AG
+  actual4?: string; // From column AH
+  transporterStatus?: string; // From column AS (#45)
+  transporterRemarks?: string; // From column AU (#47)
+  planned6?: string; // From column AV (#48)
+  actual6?: string; // From column AW (#49)
+  planned7?: string; // From column BC (#55)
+  actual7?: string; // From column BD (#56)
+  receiverName?: string;
 }
 
 // Helper function to check if response is JSON
@@ -271,6 +286,14 @@ interface IndentService {
   getVendorMasterData(): Promise<VendorMasterEntry[]>;
   getPOContactData(): Promise<POContactEntry[]>;
   getTransporterVerificationLinks(): Promise<TransporterVerificationEntry[]>;
+  updateVerificationSheet(
+    sheetName: string,
+    indentNumber: string,
+    shopName: string,
+    updates: Record<string, any>
+  ): Promise<void>;
+  addToWhatsappSheet(phone: string, message: string, mediaUrl?: string): Promise<void>;
+  getMasterReceivers(): Promise<string[]>;
 }
 
 // Function to fetch data from column A of the FMS sheet
@@ -529,7 +552,7 @@ export const indentService: IndentService = {
               "Indent No",
               "IndentNo",
               "indent",
-              "#2",
+              "#4", // Column D
             ],
             `indent-${index}`
           )
@@ -545,42 +568,39 @@ export const indentService: IndentService = {
               "Indent No",
               "IndentNo",
               "indent",
-              "#1",
+              "#4", // Column D
             ],
             ""
           )
         ),
-        skuCode: String(val(item, ["SKU Code", "SKU", "sku_code", "sku"], "")),
+        timestamp: String(val(item, ["#1", "Timestamp"], "")),
+        shopId: String(val(item, ["#2", "Shop ID", "ShopID"], "")),
+        shopName: String(val(item, ["#3", "Shop Name", "ShopName"], "")),
+        partyId: String(val(item, ["#5", "Party ID", "PartyID"], "")),
+        partyName: String(val(item, ["#6", "Party Name", "PartyName", "PARTY NAME"], "")),
         traderName: String(val(item, ["#6", "PARTY NAME", "Trader Name", "Trader", "trader_name"], "")),
-        itemName: String(val(item, ["#5", "Item Name", "Item", "item_name"], "")),
-        closingStock: num(val(item, ["#7", "BOX_CLOSING_QTY", "Closing Stock", "closing_stock"], 0)),
-        sizeML: num(val(item, ["#8", "MlS", "SIZE (ML)", "Size (ML)", "size_ml"], 0)),
-        bottlesPerCase: num(val(item, ["#9", "B/CS", "Bottles Per Case", "BottlesPerCase"], 0)),
+        brandId: String(val(item, ["#7", "Brand ID", "BrandID"], "")),
+        brandName: String(val(item, ["#8", "Brand Name", "Brand", "brand_name"], "")),
+        skuCode: String(val(item, ["#9", "Item ID", "SKU Code", "SKU", "sku_code", "sku"], "")),
+        itemName: String(val(item, ["#10", "Item Name", "Item", "item_name"], "")),
+        sizeML: num(val(item, ["#11", "Size (Mls)", "Size (ML)", "size_ml"], 0)),
+        bottlesPerCase: num(val(item, ["#12", "BPC", "Bottles Per Case", "BottlesPerCase"], 0)),
+        liquorType: String(val(item, ["#13", "Liquor Type", "LiquorType", "liquor", "Liquor"], "")),
+        closingStockBottle: num(val(item, ["#14", "Closing Stock in Bottle", "closing_stock_bottle"], 0)),
+        closingStockInBox: num(val(item, ["#15", "Closing Stock In Box", "closing_stock_in_box"], 0)),
+        perDayAvgSaleFix: num(val(item, ["#16", "Per Day Avg Sale Fix", "per_day_avg_sale_fix"], 0)),
+        perDayAvgSaleLastWeek: num(val(item, ["#17", "Per day Avg Sale (Last Week)", "per_day_avg_sale_last_week"], 0)),
+        reorderQuantityPcs: num(val(item, ["#18", "Order In Bottles", "REORDER_QTY_PCS"], 0)),
+        reorderQuantityBox: num(val(item, ["#19", "Order In Box", "REORDER_QTY_BOX"], 0)),
+        moq: num(val(item, ["#20", "MOQ"], 0)),
+        maxLevel: num(val(item, ["#21", "Max Level", "MAX_LEVEL"], 0)),
+        
+        closingStock: num(val(item, ["#14", "BOX_CLOSING_QTY", "Closing Stock", "closing_stock"], 0)), // Keeping for compatibility
         perDayAvgBoxSale: num(val(item, ["#10", "PER_DAY_AVG_BOX_SALE"], 0)),
-        reorderQuantityBox: num(val(item, ["#15", "REORDER_QTY_BOX", "Reorder Quantity (Box)", "reorder_quantity_box"], 0)),
-        shopName: String(val(item, ["#16", "SHOP_NAME", "Shop Name", "shop_name"], "")),
         orderBy: String(val(item, ["#17", "ORDER_BY", "Order By", "order_by"], "")),
-        
-        // Missing mandatory IndentItem fields:
-        brandName: String(val(item, ["#4", "Brand Name", "Brand", "brand_name"], "")),
-        moq: num(val(item, ["#11", "MOQ"], 0)),
-        maxLevel: num(val(item, ["#13", "MAX_LEVEL"], 0)),
-        reorderQuantityPcs: num(val(item, ["#14", "REORDER_QTY_PCS"], 0)),
-        approved: String(val(item, ["#18", "Approved", "Status"], "No")),
-        liquor: String(val(item, ["#12", "Liquor", "liquor_type"], "")),
-        size: String(val(item, ["Size", "size", "#8"], "")),
-        // Index Sheet new mappings
-        shopId: String(val(item, ["Shop ID", "shop_id", "ShopId"], "")),
-        partyId: String(val(item, ["Party ID", "party_id", "PartyId"], "")),
-        brandId: String(val(item, ["Brand ID", "brand_id", "BrandId"], "")),
-        liquorType: String(val(item, ["Liquor Type", "liquor_type", "LiquorType", "#12", "liquor", "Liquor"], "")),
-        closingStockInBox: num(val(item, ["Closing Stock In Box", "closing_stock_in_box", "ClosingStockInBox"], 0)),
-        perDayAvgSaleFix: num(val(item, ["Per Day Avg Sale Fix", "per_day_avg_sale_fix", "PerDayAvgSaleFix"], 0)),
-        perDayAvgSaleLastWeek: num(val(item, ["Per day Avg Sale (Last Week)", "per_day_avg_sale_last_week"], 0)),
-        
-        partyName: String(
-          val(item, ["#6", "PARTY NAME", "Trader Name", "Trader", "trader_name"], "")
-        ),
+        approved: String(val(item, ["#22", "Approved", "Status"], "No")), // Assuming Approved moved to #22 or later
+        liquor: String(val(item, ["#13", "Liquor", "liquor_type"], "")),
+        size: String(val(item, ["Size", "size", "#11"], "")),
         // NEW: PO Date from Column X (Actual 3)
         poDate: String(
           val(
@@ -601,12 +621,12 @@ export const indentService: IndentService = {
         shopManagerStatus: String(
           val(
             item,
-            ["Shop Manager Status", "shop_manager_status", "managerStatus"],
+            ["Shop Manager Status", "shop_manager_status", "managerStatus", "#25"], // Column Y
             ""
           )
         ),
         remarks: String(
-          val(item, ["Remarks", "remarks", "Notes", "notes"], "")
+          val(item, ["Remarks", "remarks", "Notes", "notes", "#26"], "") // Column Z
         ),
         approvalDate: String(
           val(
@@ -621,7 +641,7 @@ export const indentService: IndentService = {
               "approval_date",
               "approvedOn",
               "APPROVAL_DATE",
-              "#19",
+              "#23", // Column W
             ],
             ""
           )
@@ -638,6 +658,7 @@ export const indentService: IndentService = {
               "PlanDate",
               "Planned",
               "plan_date",
+              "#22", // Column V
             ],
             ""
           )
@@ -847,32 +868,41 @@ export const indentService: IndentService = {
         ),
         liftingData: {
           transportCopy: String(
-            val(item, ["Transport Copy", "transport_copy", "TransportCopy"], "")
+            val(item, ["#52", "Transport Copy", "transport_copy", "TransportCopy"], "")
           ),
           billCopy: String(
-            val(item, ["Bill Copy", "bill_copy", "BillCopy"], "")
+            val(item, ["#54", "Bill Copy 2", "Bill Copy", "bill_copy", "BillCopy"], "")
           ),
           qty: String(
-            val(item, ["QTY", "Lifting Qty", "lifting_qty", "Qty"], "")
+            val(item, ["#53", "Pickup Qty", "QTY", "Lifting Qty", "lifting_qty", "Qty"], "")
           ),
           liftingCompletedAt: String(
             val(
               item,
               [
+                "Actual 6",
                 "Lifting Completed At",
                 "lifting_completed_at",
                 "liftingCompletedAt",
+                "#49"
               ],
               ""
             )
           ),
         },
-        traderVerificationLink: String(
-          val(item, ["Trader Verification", "BN", "#66"], "")
-        ),
-        transporterVerificationLink: String(
-          val(item, ["Transporter Verification", "BK", "#63"], "")
-        ),
+        traderVerificationLink: String(val(item, ["#64"], "")),
+        transporterVerificationLink: String(val(item, ["#63"], "")),
+        traderStatus: String(val(item, ["#38", "Trader Acceptance", "traderStatus"], "")),
+        dispatchDate: String(val(item, ["#40", "Dispatch Date", "dispatchDate"], "")),
+        remarksTrader: String(val(item, ["#41", "Remarks", "remarksTrader"], "")),
+        planned4: String(val(item, ["#33", "Planned 4", "planned4"], "")),
+        actual4: String(val(item, ["#34", "Actual 4", "actual4"], "")),
+        transporterStatus: String(val(item, ["#45", "Transporter Status", "transporterStatus"], "")),
+        transporterRemarks: String(val(item, ["#47", "Transporter Remarks", "transporterRemarks"], "")),
+        planned6: String(val(item, ["#48", "Planned 6", "planned6"], "")),
+        actual6: String(val(item, ["#49", "Actual 6", "actual6"], "")),
+        planned7: String(val(item, ["#55", "Planned 7", "planned7"], "")),
+        actual7: String(val(item, ["#56", "Actual 7", "actual7"], "")),
         _rowIndex: realRowIndex,
       });
 
@@ -1061,6 +1091,9 @@ export const indentService: IndentService = {
       let colStatus = -1;
       let colRemarks = -1;
       let colApprovalName = -1;
+      let colActual6 = -1;
+      let colPlanned7 = -1;
+      let colActual7 = -1;
 
       // Define column search patterns
       const patApproval = ["Actual 1", "actual1", "Approval Date", "approval_date", "approvedOn", "APPROVAL_DATE"];
@@ -1099,11 +1132,20 @@ export const indentService: IndentService = {
           colStatus = findColInHeader(headerRow, patStatus);
           colRemarks = findColInHeader(headerRow, patRemarks);
           colApprovalName = findColInHeader(headerRow, patApprovalName);
+          colActual6 = findColInHeader(headerRow, ["Actual 6", "Actual6", "actual_6"]);
+          if (colActual6 === -1) colActual6 = 48; // Fallback to AW
+          colPlanned7 = findColInHeader(headerRow, ["Planned 7", "Planned7", "planned_7"]);
+          if (colPlanned7 === -1) colPlanned7 = 54; // Fallback to BC
+          colActual7 = findColInHeader(headerRow, ["Actual 7", "Actual7", "actual_7"]);
+          if (colActual7 === -1) colActual7 = 55; // Fallback to BD
         } else {
           console.warn("Could not fetch headers, utilizing default indices.");
           colApproval = 18; // S
           colStatus = 29; // AD
           colApprovalName = 42; // AQ
+          colActual6 = 48; // AW
+          colPlanned7 = 54; // BC
+          colActual7 = 55; // BD
         }
 
       } else {
@@ -1148,9 +1190,15 @@ export const indentService: IndentService = {
         colStatus = findColInHeader(header, patStatus);
         colRemarks = findColInHeader(header, patRemarks);
         colApprovalName = findColInHeader(header, patApprovalName);
+        colActual6 = findColInHeader(header, ["Actual 6", "Actual 6", "actual_6"]);
+        if (colActual6 === -1) colActual6 = 48; // Fallback to AW
+        colPlanned7 = findColInHeader(header, ["Planned 7", "Planned 7", "planned_7"]);
+        if (colPlanned7 === -1) colPlanned7 = 54; // Fallback to BC
+        colActual7 = findColInHeader(header, ["Actual 7", "Actual 7", "actual_7"]);
+        if (colActual7 === -1) colActual7 = 55; // Fallback to BD
 
         // Find Row
-        const colIndent = findColInHeader(header, ["Indent Number", "IndentNumber", "indent"]);
+        const colIndent = findColInHeader(header, ["Indent Number", "IndentNumber", "indent", "Indent No", "IndentNo"]);
         const colSku = findColInHeader(header, ["SKU Code", "SKU", "sku"]);
         const colItemName = findColInHeader(header, ["Item Name", "Item", "item_name"]);
 
@@ -1180,7 +1228,14 @@ export const indentService: IndentService = {
         }
       }
 
-      if (rowIndex < 1) throw new Error("Indent not found or row index invalid");
+      if (rowIndex < 1) {
+        // For PO, Lifting, and Received inserts, row-level updates to All Indent are optional.
+        // We still proceed to insert the record into the target sheet.
+        if (!updates.isLifting && !updates.isPO && !updates.isReceived) {
+          throw new Error("Indent not found or row index invalid");
+        }
+        console.warn(`Row not found for indent "${id}" — skipping All Indent update, but continuing with sheet insertion.`);
+      }
 
       // Update approval fields using markdeleted to FMS sheet
       if (
@@ -1254,6 +1309,60 @@ export const indentService: IndentService = {
         console.log("✅ Approval fields updated in FMS sheet");
       }
 
+      // Handle actual6 update for lifting (only if row was found)
+      if (updates.actual6 && colActual6 >= 0 && rowIndex >= 1) {
+        const markUrl = buildUrl("markdeleted");
+        const params = new URLSearchParams();
+        params.set("action", "markdeleted");
+        params.set("sheet", SHEET_NAME);
+        if (SHEET_ID) params.set("sheetId", SHEET_ID);
+        params.set("rowIndex", String(rowIndex));
+        params.set("columnIndex", String(colActual6 + 1));
+        params.set("value", String(updates.actual6));
+        await fetch(markUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+          body: params.toString(),
+        });
+        console.log(`✅ Updated Actual 6 at row ${rowIndex}, col ${colActual6 + 1}`);
+      }
+
+      // Handle planned7 update (only if row was found)
+      if (updates.planned7 && colPlanned7 >= 0 && rowIndex >= 1) {
+        const markUrl = buildUrl("markdeleted");
+        const params = new URLSearchParams();
+        params.set("action", "markdeleted");
+        params.set("sheet", SHEET_NAME);
+        if (SHEET_ID) params.set("sheetId", SHEET_ID);
+        params.set("rowIndex", String(rowIndex));
+        params.set("columnIndex", String(colPlanned7 + 1));
+        params.set("value", String(updates.planned7));
+        await fetch(markUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+          body: params.toString(),
+        });
+        console.log(`✅ Updated Planned 7 at row ${rowIndex}, col ${colPlanned7 + 1}`);
+      }
+
+      // Handle actual7 update (only if row was found)
+      if (updates.actual7 && colActual7 >= 0 && rowIndex >= 1) {
+        const markUrl = buildUrl("markdeleted");
+        const params = new URLSearchParams();
+        params.set("action", "markdeleted");
+        params.set("sheet", SHEET_NAME);
+        if (SHEET_ID) params.set("sheetId", SHEET_ID);
+        params.set("rowIndex", String(rowIndex));
+        params.set("columnIndex", String(colActual7 + 1));
+        params.set("value", String(updates.actual7));
+        await fetch(markUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+          body: params.toString(),
+        });
+        console.log(`✅ Updated Actual 7 at row ${rowIndex}, col ${colActual7 + 1}`);
+      }
+
       // Handle approval insertion to "Approval" sheet
       if (updates.isApproval) {
         console.log("Inserting approval record to Approval sheet");
@@ -1318,14 +1427,14 @@ export const indentService: IndentService = {
           updates.transporterName || "", // Transport Name col D (3)
           updates.poCopyLink || "", // PO Copy col E (4)
           updates.poNumber || "", // Po No. col F (5)
-          updates.poQty || "", // PO Qty col G (6)
+          updates.poQty !== undefined && updates.poQty !== null ? String(updates.poQty) : "", // PO Qty col G (6)
           updates.remarksFrontend || "", // Remarks1 col H (7)
           updates.traderName || "", // Trader Name col I (8)
-          updates.receiverManager || "", // Receiver Manager col J (9)
+          updates.receiverManager || "" , // Receiver Manager col J (9)
           updates.skuCode || "", // SKU Code col K (10)
-          updates.traderPhone || "", // Trader Phone col L (11)
-          updates.transporterPhone || "", // Transporter Phone col M (12)
-          updates.receiverPhone || "", // Receiver Phone col N (13)
+          updates.receiverSlipLink || "", // Receive PO Copy col L (11)
+          "", // Empty col M (12)
+          updates.liftingFormLink || "", // Get Lifting Form Link col N (13)
         ];
         console.log("PO rowData being sent:", poRowData);
         poUrl.searchParams.set("rowData", JSON.stringify(poRowData));
@@ -1364,12 +1473,14 @@ export const indentService: IndentService = {
         liftUrl.searchParams.set("sheet", "Lift");
         if (SHEET_ID) liftUrl.searchParams.set("sheetId", SHEET_ID);
         const liftRowData = [
-          new Date().toISOString().slice(0, 19).replace("T", " "), // Timestamp col A
-          id, // Indent Number col B
-          updates.shopName || "", // Shop Name col C
-          updates.liftingData?.transportCopy || "", // Transport Copy col D
-          updates.liftingData?.qty || "", // QTY col E
-          updates.liftingData?.billCopy || "", // Bill Copy col F
+          new Date().toISOString().slice(0, 19).replace("T", " "), // Col A - Timestamp
+          id,                                                        // Col B - Indent Number
+          updates.shopName || "",                                    // Col C - Shop Name
+          (updates as any).transporterName || "",                    // Col D - Transporter Name
+          updates.liftingData?.transportCopy || "",                  // Col E - Transport Copy URL
+          updates.liftingData?.billCopy || "",                       // Col F - Bill Copy URL
+          updates.liftingData?.qty || "",                            // Col G - QTY (Pcs)
+          updates.liftingData?.liftingCompletedAt || "",             // Col H - Completed At
         ];
         console.log("Lift rowData being sent:", liftRowData);
         liftUrl.searchParams.set("rowData", JSON.stringify(liftRowData));
@@ -1408,12 +1519,13 @@ export const indentService: IndentService = {
         receivedUrl.searchParams.set("sheet", "Received");
         if (SHEET_ID) receivedUrl.searchParams.set("sheetId", SHEET_ID);
         const receivedRowData = [
-          new Date().toISOString().slice(0, 19).replace("T", " "), // Timestamp col A
-          id, // Indent Number col B
-          updates.shopName || "", // Shop Name col C
-          updates.receivedQty || "", // Received Qty col D
-          updates.difference || "", // Diff col E
-          updates.receiveRemarks || "", // Remark2 col F
+          new Date().toISOString().slice(0, 19).replace("T", " "), // Col A - Timestamp
+          id,                                                        // Col B - Indent Number
+          updates.shopName || "",                                    // Col C - Shop Name
+          updates.receiverName || "",                                // Col D - Receiver Name (NEW)
+          updates.receivedQty || "",                                 // Col E - Received Qty
+          updates.difference || "",                                  // Col F - Diff
+          updates.receiveRemarks || "",                              // Col G - Remark2
         ];
         console.log("Received rowData being sent:", receivedRowData);
         receivedUrl.searchParams.set(
@@ -2309,9 +2421,12 @@ export const indentService: IndentService = {
 
     try {
       // Fetch from Master sheet
-      const url = buildUrl().replace(`sheet=${SHEET_NAME}`, `sheet=Master`);
-      console.log("Fetching approval names from:", url);
-      const response = await fetch(url, {
+      const base = buildUrl("fetch");
+      const url = new URL(base, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("sheet", "Master");
+      
+      console.log("Fetching approval names from:", url.toString());
+      const response = await fetch(url.toString(), {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -2337,15 +2452,16 @@ export const indentService: IndentService = {
 
       console.log("Rows to process for approval names:", rows);
 
-      // Column D is index 3 (0-based)
+      // Column C is index 2 (0-based)
       const approvalNames = rows
         .slice(1) // Skip header row
         .map((row: any) => {
-          if (Array.isArray(row)) return String(row[3] || "").trim(); // Column D is index 3
+          if (Array.isArray(row)) return String(row[2] || "").trim(); // Column C is index 2
           return String(
             row["Approval Name"] ||
             row.approvalName ||
             row["approval name"] ||
+            row["Manager Name"] ||
             ""
           ).trim();
         })
@@ -2560,4 +2676,105 @@ export const indentService: IndentService = {
       return [];
     }
   },
-};
+
+  async updateVerificationSheet(
+    sheetName: string,
+    indentNumber: string,
+    shopName: string,
+    updates: Record<string, any>
+  ): Promise<void> {
+    if (!SCRIPT_URL) return;
+    try {
+      const url = buildUrl("update");
+      const body = {
+        sheet: sheetName,
+        matchCriteria: {
+          "Indent Number": indentNumber,
+          "Shop Name": shopName
+        },
+        updates: updates
+      };
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+      if (!result.success) throw new Error(result.message || "Update failed");
+    } catch (error) {
+      console.error(`Error updating ${sheetName}:`, error);
+      throw error;
+    }
+  },
+
+  async addToWhatsappSheet(phone: string, message: string, mediaUrl?: string): Promise<void> {
+    if (!SCRIPT_URL) return;
+    try {
+      const url = buildUrl("append");
+      let formattedPhone = phone.trim();
+      if (formattedPhone.length === 10) formattedPhone = '91' + formattedPhone;
+
+      const body = {
+        sheet: "Whatsapp",
+        data: {
+          "Phone": formattedPhone,
+          "Message": message,
+          "Media URL": mediaUrl || "",
+          "Status": "Pending",
+          "Timestamp": new Date().toISOString()
+        }
+      };
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+      if (!result.success) throw new Error(result.message || "Failed to add to Whatsapp sheet");
+    } catch (error) {
+      console.error("Error adding to Whatsapp sheet:", error);
+      throw error;
+    }
+  },
+  async getMasterReceivers(): Promise<string[]> {
+    if (!SCRIPT_URL) return ["Main Receiver", "Backup Receiver"];
+    try {
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", SHEET_ID);
+      url.searchParams.set("sheet", "Master");
+      
+      console.log("Fetching master receivers from:", url.toString());
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+      
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      const data = await response.json();
+      const rows: any[] = Array.isArray(data) ? data : (data.data || data.values || []);
+      if (rows.length === 0) return [];
+
+      // Column E is index 4 (0-based)
+      const receivers = rows
+        .slice(1) // Skip header row
+        .map((row: any) => {
+          if (Array.isArray(row)) return String(row[4] || "").trim();
+          return String(row["Receiver Name"] || row.ReceiverName || "").trim();
+        })
+        .filter(Boolean);
+
+      const uniqueNames = [...new Set(receivers)].sort();
+      return uniqueNames.length > 0 ? uniqueNames : ["Main Store Receiver"];
+    } catch (error) {
+      console.error("Error fetching master receivers:", error);
+      return ["Main Store Receiver"];
+    }
+  },
+};

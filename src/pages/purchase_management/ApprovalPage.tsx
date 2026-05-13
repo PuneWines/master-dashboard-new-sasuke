@@ -27,7 +27,12 @@ const formatTimestamp = (date: Date): string => {
 const formatNumber = (value: number | string | undefined) => {
   if (value === undefined || value === null || value === "") return value;
   const num = Number(value);
-  return isNaN(num) ? value : Math.round(num);
+  if (isNaN(num)) return value;
+  // If it's an integer, return as is (optional) or always 2 decimals
+  // User asked for "Only for 2 Digit number", usually means max 2 or exactly 2.
+  // We'll use toFixed(2) but convert back to number to remove unnecessary zeros if integer.
+  // Actually, let's keep it consistent:
+  return parseFloat(num.toFixed(2));
 };
 
 // small debounce hook to avoid re-filtering on every keystroke
@@ -68,12 +73,13 @@ interface IndentItem {
   status?: string;
   actualTimestamp1?: string;
   _rowIndex?: number;
-  // Added fields from IndexSheet
+  timestamp?: string;
   shopId?: string;
   partyId?: string;
   brandId?: string;
   liquorType?: string;
   closingStockInBox?: number;
+  closingStockBottle?: number;
   perDayAvgSaleFix?: number;
   perDayAvgSaleLastWeek?: number;
   partyName?: string;
@@ -101,10 +107,6 @@ interface ColumnVisibility {
   reorderQuantityBox: boolean;
   moq: boolean;
   maxLevel: boolean;
-  approved: boolean;
-  liquor: boolean;
-  size: boolean;
-  orderBy: boolean;
 }
 
 export const ApprovalPage: React.FC = () => {
@@ -113,6 +115,8 @@ export const ApprovalPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkItemsToApprove, setBulkItemsToApprove] = useState<IndentItem[]>([]);
 
   const [activeTab, setActiveTab] = useState<"pending" | "history">("pending");
   const [searchTerm, setSearchTerm] = useState("");
@@ -164,10 +168,6 @@ export const ApprovalPage: React.FC = () => {
     reorderQuantityBox: true,
     moq: true,
     maxLevel: true,
-    approved: true,
-    liquor: true,
-    size: true,
-    orderBy: true,
   });
 
   // Fetch approval names on component mount
@@ -262,10 +262,6 @@ export const ApprovalPage: React.FC = () => {
     reorderQuantityBox: "Order In Box",
     moq: "MOQ",
     maxLevel: "Max Level",
-    approved: "Approved",
-    liquor: "Liquor",
-    size: "Size",
-    orderBy: "Order By",
   };
 
   const toggleColumn = (column: keyof ColumnVisibility) => {
@@ -334,9 +330,17 @@ export const ApprovalPage: React.FC = () => {
     );
   };
 
-  const handleBulkApprove = async () => {
+  const handleBulkApprove = () => {
     if (selectedIds.size === 0) return;
 
+    const items = indents.filter((indent) =>
+      selectedIds.has(getIndentKey(indent))
+    );
+    setBulkItemsToApprove(items);
+    setShowBulkModal(true);
+  };
+
+  const handleConfirmBulkApprove = async () => {
     if (!selectedApprovalName) {
       setError("Please select an approval name");
       setTimeout(() => setError(""), 3000);
@@ -346,10 +350,6 @@ export const ApprovalPage: React.FC = () => {
     setIsApproving(true);
 
     const currentDate = formatTimestamp(new Date());
-    const itemsToApprove = indents.filter((indent) =>
-      selectedIds.has(getIndentKey(indent))
-    );
-
     const commonUpdates = {
       shopManagerStatus: "Approved",
       remarks: "",
@@ -361,7 +361,7 @@ export const ApprovalPage: React.FC = () => {
     };
 
     // Prepare items for bulk update
-    const bulkItems = itemsToApprove.map((item) => ({
+    const bulkItems = bulkItemsToApprove.map((item) => ({
       id: item.indentNumber,
       updates: {
         ...commonUpdates,
@@ -392,8 +392,15 @@ export const ApprovalPage: React.FC = () => {
       );
 
       setSelectedIds(new Set());
+      setShowBulkModal(false);
+      setBulkItemsToApprove([]);
       setShowSuccessAnimation(true);
       setActiveTab("history");
+
+      // Reload page to ensure checkboxes and table state are fully synchronized with Google Sheets
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
     } catch (error) {
       console.error("Bulk approval failed:", error);
       setError("Failed to approve. Sheet update did not complete.");
@@ -464,9 +471,10 @@ export const ApprovalPage: React.FC = () => {
         setShowSuccessAnimation(true);
         setActiveTab("history");
 
-        // Automatically refresh page after successful submission to reload updated data
+        // Reload page to ensure checkboxes and table state are fully synchronized with Google Sheets
         setTimeout(() => {
-        }, 100); // 0.1 second delay for faster feedback
+          window.location.reload();
+        }, 1500);
       } catch (error) {
         console.error("Single approval failed:", error);
         setError("Failed to update approval. Please try again.");
@@ -477,14 +485,15 @@ export const ApprovalPage: React.FC = () => {
     }
   };
 
-  const hasValue = (s?: string) => typeof s === "string" && s.trim() !== "";
-
-  // Pending: Planned1 has value AND Actual 1 (approvalDate) is empty
+  const hasValue = (s?: string) => 
+    typeof s === "string" && s.trim() !== "" && s.toLowerCase() !== "null" && s.toLowerCase() !== "undefined";
+  
+  // Pending: Planned 1 (plannedDate) is NOT NULL AND Actual 1 (approvalDate) IS NULL
   const pendingIndents = useMemo(() => indents.filter(
     (indent) => hasValue(indent.plannedDate) && !hasValue(indent.approvalDate)
   ), [indents]);
 
-  // History: Planned1 has value AND Actual 1 (approvalDate) has value
+  // History: Planned 1 (plannedDate) is NOT NULL AND Actual 1 (approvalDate) IS NOT NULL
   const historyIndents = useMemo(() => indents.filter(
     (indent) => hasValue(indent.plannedDate) && hasValue(indent.approvalDate)
   ), [indents]);
@@ -923,12 +932,8 @@ export const ApprovalPage: React.FC = () => {
             </div>
           </div>
 
-          {/* ✅ Desktop Table View (Fixed) */}
-          <div
-            key={activeTab}
-            className="hidden bg-white rounded-xl border border-gray-200 shadow-lg lg:block"
-          >
-            {/* This wrapper fixes the scrolling issue */}
+          {/* Desktop Table View */}
+          <div className="hidden lg:block bg-white rounded-xl border border-gray-200 shadow-lg">
             <div className="overflow-x-auto w-full lg:w-[calc(100vw-16rem)]">
               <div className="max-h-[70vh] overflow-y-auto">
                 <table className="w-full min-w-[1200px] text-sm divide-y divide-gray-200">
@@ -936,7 +941,6 @@ export const ApprovalPage: React.FC = () => {
                     <tr>
                       {activeTab === "pending" && (
                         <th className="px-3 py-3 text-left">
-
                           <input
                             type="checkbox"
                             onChange={toggleSelectAllVisible}
@@ -949,494 +953,200 @@ export const ApprovalPage: React.FC = () => {
                           />
                         </th>
                       )}
-
-                      {columnVisibility.timestamp && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Timestamp
-                        </th>
-                      )}
-                      {columnVisibility.shopId && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Shop ID
-                        </th>
-                      )}
-                      {columnVisibility.shopName && (
-                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Shop Name
-                        </th>
-                      )}
-                      {columnVisibility.indentNumber && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Indent No
-                        </th>
-                      )}
-                      {columnVisibility.partyId && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Party ID
-                        </th>
-                      )}
-                      {columnVisibility.traderName && (
-                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Party Name
-                        </th>
-                      )}
-                      {columnVisibility.brandId && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Brand ID
-                        </th>
-                      )}
-                      {columnVisibility.brandName && (
-                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Brand Name
-                        </th>
-                      )}
-                      {columnVisibility.skuCode && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Item ID / SKU Code
-                        </th>
-                      )}
-                      {columnVisibility.itemName && (
-                        <th className="px-4 py-3 min-w-[200px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Item Name
-                        </th>
-                      )}
-                      {columnVisibility.sizeML && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Size (Mls)
-                        </th>
-                      )}
-                      {columnVisibility.bottlesPerCase && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          BPC
-                        </th>
-                      )}
-                      {columnVisibility.liquorType && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Liquor Type
-                        </th>
-                      )}
-                      {columnVisibility.closingStock && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Closing Stock in Bottle
-                        </th>
-                      )}
-                      {columnVisibility.closingStockInBox && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Closing Stock In Box
-                        </th>
-                      )}
-                      {columnVisibility.perDayAvgSaleFix && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Per Day Avg Sale Fix
-                        </th>
-                      )}
-                      {columnVisibility.perDayAvgSaleLastWeek && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Per day Avg Sale (Last Week)
-                        </th>
-                      )}
-                      {columnVisibility.reorderQuantityPcs && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Order In Bottles
-                        </th>
-                      )}
-                      {columnVisibility.reorderQuantityBox && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Order In Box
-                        </th>
-                      )}
-                      {columnVisibility.moq && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          MOQ
-                        </th>
-                      )}
-                      {columnVisibility.maxLevel && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Max Level
-                        </th>
-                      )}
-                      {columnVisibility.approved && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Approved
-                        </th>
-                      )}
-                      {columnVisibility.liquor && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Liquor
-                        </th>
-                      )}
-                      {columnVisibility.size && (
-                        <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Size
-                        </th>
-                      )}
-                      {columnVisibility.orderBy && (
-                        <th className="px-4 py-3 min-w-[150px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                          Order By
-                        </th>
+                      {Object.keys(columnVisibility).map((key) => 
+                        columnVisibility[key as keyof ColumnVisibility] && (
+                          <th key={key} className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
+                            {columnLabels[key as keyof typeof columnLabels]}
+                          </th>
+                        )
                       )}
                       {activeTab === "history" && (
                         <>
-                          <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                            Shop Manager Status
-                          </th>
-                          <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                            Approval Date
-                          </th>
-                          <th className="px-4 py-3 min-w-[200px] font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">
-                            Remarks
-                          </th>
+                          <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">Status</th>
+                          <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">Approval Date</th>
+                          <th className="px-4 py-3 font-semibold tracking-wider text-left text-gray-700 uppercase whitespace-nowrap">Remarks</th>
                         </>
                       )}
                     </tr>
                   </thead>
                   <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredIndents.length > 0 ? (
-                      filteredIndents.map((indent, index) => (
-                        <tr
-                          key={`${indent.indentNumber}-${indent.skuCode}-${indent.shopName}-${index}`}
-                          className="transition-colors duration-150 hover:bg-gray-50"
-                        >
-                          {activeTab === "pending" && (
-                            <td className="px-3 py-4 whitespace-nowrap">
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.has(getIndentKey(indent))}
-                                onChange={() =>
-                                  toggleSelect(getIndentKey(indent))
-                                }
-                              />
-                            </td>
-                          )}
-
-                          {columnVisibility.timestamp && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.actualTimestamp1
-                                ? formatTimestamp(
-                                  new Date(indent.actualTimestamp1)
-                                )
-                                : "-"}
-                            </td>
-                          )}
-                          {columnVisibility.shopId && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.shopId || "-"}
-                            </td>
-                          )}
-                          {columnVisibility.shopName && (
-                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
-                              {indent.shopName || "-"}
-                            </td>
-                          )}
-                          {columnVisibility.indentNumber && (
-                            <td className="px-4 py-4 font-medium text-gray-900 whitespace-nowrap">
-                              {indent.indentNumber}
-                            </td>
-                          )}
-                          {columnVisibility.partyId && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.partyId || "-"}
-                            </td>
-                          )}
-                          {columnVisibility.traderName && (
-                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
-                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
-                                <input
-                                  type="text"
-                                  value={indent.traderName || ""}
-                                  onChange={(e) => handleInputChange(indent, 'traderName', e.target.value)}
-                                  className="w-full px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              ) : (
-                                indent.traderName || "-"
-                              )}
-                            </td>
-                          )}
-                          {columnVisibility.brandId && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.brandId || "-"}
-                            </td>
-                          )}
-                          {columnVisibility.brandName && (
-                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
-                              {indent.brandName}
-                            </td>
-                          )}
-                          {columnVisibility.skuCode && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.skuCode}
-                            </td>
-                          )}
-                          {columnVisibility.itemName && (
-                            <td className="px-4 py-4 min-w-[200px] text-gray-600 whitespace-nowrap">
-                              {indent.itemName}
-                            </td>
-                          )}
-                          {columnVisibility.sizeML && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.sizeML)}
-                            </td>
-                          )}
-                          {columnVisibility.bottlesPerCase && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.bottlesPerCase)}
-                            </td>
-                          )}
-                          {columnVisibility.liquorType && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.liquorType || indent.liquor || "-"}
-                            </td>
-                          )}
-                          {columnVisibility.closingStock && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.closingStock)}
-                            </td>
-                          )}
-                          {columnVisibility.closingStockInBox && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.closingStockInBox)}
-                            </td>
-                          )}
-                          {columnVisibility.perDayAvgSaleFix && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.perDayAvgSaleFix)}
-                            </td>
-                          )}
-                          {columnVisibility.perDayAvgSaleLastWeek && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.perDayAvgSaleLastWeek)}
-                            </td>
-                          )}
-                          {columnVisibility.reorderQuantityPcs && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
-                                <input
-                                  type="number"
-                                  value={indent.reorderQuantityPcs}
-                                  onChange={(e) => handleInputChange(indent, 'reorderQuantityPcs', e.target.value)}
-                                  className="w-24 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              ) : (
-                                formatNumber(indent.reorderQuantityPcs)
-                              )}
-                            </td>
-                          )}
-                          {columnVisibility.reorderQuantityBox && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {activeTab === "pending" && selectedIds.has(getIndentKey(indent)) ? (
-                                <input
-                                  type="number"
-                                  value={indent.reorderQuantityBox}
-                                  onChange={(e) => handleInputChange(indent, 'reorderQuantityBox', e.target.value)}
-                                  className="w-24 px-2 py-1 text-sm border border-blue-300 rounded focus:ring-2 focus:ring-blue-500 outline-none"
-                                />
-                              ) : (
-                                formatNumber(indent.reorderQuantityBox)
-                              )}
-                            </td>
-                          )}
-                          {columnVisibility.moq && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.moq)}
-                            </td>
-                          )}
-                          {columnVisibility.maxLevel && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {formatNumber(indent.maxLevel)}
-                            </td>
-                          )}
-                          {columnVisibility.approved && (
-                            <td className="px-4 py-4 whitespace-nowrap">
-                              <span
-                                className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-yellow-100 text-yellow-800"
-                                  }`}
-                              >
-                                {indent.approved}
-                              </span>
-                            </td>
-                          )}
-                          {columnVisibility.liquor && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.liquor}
-                            </td>
-                          )}
-                          {columnVisibility.size && (
-                            <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                              {indent.size}
-                            </td>
-                          )}
-                          {columnVisibility.orderBy && (
-                            <td className="px-4 py-4 min-w-[150px] text-gray-600 whitespace-nowrap">
-                              {indent.orderBy}
-                            </td>
-                          )}
-                          {activeTab === "history" && (
-                            <>
-                              <td className="px-4 py-4 whitespace-nowrap">
-                                <span
-                                  className={`px-2 py-1 text-xs font-medium rounded-full ${indent.shopManagerStatus === "Approved"
-                                      ? "bg-green-100 text-green-800"
-                                      : "bg-red-100 text-red-800"
-                                    }`}
-                                >
-                                  {indent.shopManagerStatus}
-                                </span>
-                              </td>
-                              <td className="px-4 py-4 text-gray-600 whitespace-nowrap">
-                                {indent.approvalDate
-                                  ? new Date(
-                                    indent.approvalDate
-                                  ).toLocaleDateString()
-                                  : "-"}
-                              </td>
-                              <td className="px-4 py-4 min-w-[200px] max-w-xs text-gray-600 truncate">
-                                {indent.remarks || "-"}
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td
-                          colSpan={
-                            Object.values(columnVisibility).filter(Boolean)
-                              .length + (activeTab === "history" ? 4 : 1)
-                          }
-                          className="px-6 py-6 text-center text-gray-500"
-                        >
-                          No {activeTab === "pending" ? "pending" : "history"}{" "}
-                          indents found matching your search
-                        </td>
+                    {filteredIndents.map((indent, index) => (
+                      <tr key={`${indent.indentNumber}-${index}`} className="hover:bg-gray-50">
+                        {activeTab === "pending" && (
+                          <td className="px-3 py-4">
+                            <input 
+                              type="checkbox" 
+                              checked={selectedIds.has(getIndentKey(indent))} 
+                              onChange={() => toggleSelect(getIndentKey(indent))} 
+                            />
+                          </td>
+                        )}
+                        {columnVisibility.timestamp && (
+                          <td className="px-4 py-4 whitespace-nowrap text-gray-600">
+                            {(() => {
+                              const raw = (indent.timestamp && indent.timestamp !== "-" && indent.timestamp.toLowerCase() !== "null")
+                                ? indent.timestamp
+                                : (indent.actualTimestamp1 && indent.actualTimestamp1 !== "-" && indent.actualTimestamp1.toLowerCase() !== "null")
+                                  ? indent.actualTimestamp1
+                                  : null;
+                              
+                              if (!raw) return "-";
+                              
+                              const date = new Date(raw);
+                              return isNaN(date.getTime()) ? raw : formatTimestamp(date);
+                            })()}
+                          </td>
+                        )}
+                        {columnVisibility.shopId && <td className="px-4 py-4">{indent.shopId}</td>}
+                        {columnVisibility.shopName && <td className="px-4 py-4">{indent.shopName}</td>}
+                        {columnVisibility.indentNumber && <td className="px-4 py-4">{indent.indentNumber}</td>}
+                        {columnVisibility.partyId && <td className="px-4 py-4">{indent.partyId}</td>}
+                        {columnVisibility.traderName && <td className="px-4 py-4">{indent.traderName}</td>}
+                        {columnVisibility.brandId && <td className="px-4 py-4">{indent.brandId}</td>}
+                        {columnVisibility.brandName && <td className="px-4 py-4">{indent.brandName}</td>}
+                        {columnVisibility.skuCode && <td className="px-4 py-4">{indent.skuCode}</td>}
+                        {columnVisibility.itemName && <td className="px-4 py-4">{indent.itemName}</td>}
+                        {columnVisibility.sizeML && <td className="px-4 py-4">{formatNumber(indent.sizeML)}</td>}
+                        {columnVisibility.bottlesPerCase && <td className="px-4 py-4">{formatNumber(indent.bottlesPerCase)}</td>}
+                        {columnVisibility.liquorType && <td className="px-4 py-4">{indent.liquorType}</td>}
+                        {columnVisibility.closingStock && <td className="px-4 py-4">{formatNumber(indent.closingStock)}</td>}
+                        {columnVisibility.closingStockInBox && <td className="px-4 py-4">{formatNumber(indent.closingStockInBox)}</td>}
+                        {columnVisibility.perDayAvgSaleFix && <td className="px-4 py-4">{formatNumber(indent.perDayAvgSaleFix)}</td>}
+                        {columnVisibility.perDayAvgSaleLastWeek && <td className="px-4 py-4">{formatNumber(indent.perDayAvgSaleLastWeek)}</td>}
+                        {columnVisibility.reorderQuantityPcs && <td className="px-4 py-4">{formatNumber(indent.reorderQuantityPcs)}</td>}
+                        {columnVisibility.reorderQuantityBox && <td className="px-4 py-4">{formatNumber(indent.reorderQuantityBox)}</td>}
+                        {columnVisibility.moq && <td className="px-4 py-4">{formatNumber(indent.moq)}</td>}
+                        {columnVisibility.maxLevel && <td className="px-4 py-4">{formatNumber(indent.maxLevel)}</td>}
+                        {activeTab === "history" && (
+                          <>
+                            <td className="px-4 py-4">{indent.shopManagerStatus}</td>
+                            <td className="px-4 py-4">{indent.approvalDate}</td>
+                            <td className="px-4 py-4">{indent.remarks}</td>
+                          </>
+                        )}
                       </tr>
-                    )}
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Mobile Card View */}
-          <div className="space-y-4 lg:hidden">
-            {filteredIndents.length > 0 ? (
-              filteredIndents.map((indent, index) => (
-                <div
-                  key={`${indent.indentNumber}-${indent.skuCode}-${indent.shopName}-${index}`}
-                  className="p-4 space-y-3 bg-white rounded-xl border border-gray-200 shadow-md"
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="text-sm font-semibold text-gray-900">
-                        {indent.indentNumber}
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {indent.skuCode}
-                      </div>
-                    </div>
-                    <span
-                      className={`px-2 py-1 text-xs font-medium rounded-full ${indent.approved === "Yes"
-                          ? "bg-green-100 text-green-800"
-                          : "bg-yellow-100 text-yellow-800"
-                        }`}
-                    >
-                      {indent.approved}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <div className="text-xs text-gray-500">Item Name</div>
-                      <div className="font-medium text-gray-900">
-                        {indent.itemName}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Brand</div>
-                      <div className="font-medium text-gray-900">
-                        {indent.brandName}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Trader</div>
-                      <div className="font-medium text-gray-900">
-                        {indent.traderName || "-"}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Shop</div>
-                      <div className="font-medium text-gray-900">
-                        {indent.shopName}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Closing Stock</div>
-                      <div className="font-medium text-gray-900">
-                        {formatNumber(indent.closingStock)}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs text-gray-500">Reorder (Pcs)</div>
-                      <div className="font-medium text-gray-900">
-                        {formatNumber(indent.reorderQuantityPcs)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {activeTab === "history" && indent.shopManagerStatus && (
-                    <div className="pt-3 space-y-2 border-t border-gray-200">
-                      <div className="flex justify-between items-center">
-                        <span className="text-xs text-gray-500">
-                          Shop Manager Status:
-                        </span>
-                        <span
-                          className={`px-2 py-1 text-xs font-medium rounded-full ${indent.shopManagerStatus === "Approved"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-red-100 text-red-800"
-                            }`}
-                        >
-                          {indent.shopManagerStatus}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-xs">
-                        <span className="text-gray-500">Approval Date:</span>
-                        <span className="font-medium text-gray-900">
-                          {indent.approvalDate
-                            ? new Date(indent.approvalDate).toLocaleDateString()
-                            : "-"}
-                        </span>
-                      </div>
-                      {indent.remarks && (
-                        <div className="text-xs">
-                          <span className="text-gray-500">Remarks:</span>
-                          <p className="mt-1 font-medium text-gray-900">
-                            {indent.remarks}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {activeTab === "pending" && (
-                    <button
-                      onClick={() => handleApprove(indent)}
-                      className="flex gap-2 justify-center items-center px-4 py-2 w-full text-sm font-medium text-white bg-green-600 rounded-lg transition-colors duration-200 hover:bg-green-700"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      Approve
-                    </button>
-                  )}
+      {/* Bulk Approval Modal */}
+      {showBulkModal && (
+        <div className="flex fixed inset-0 z-50 justify-center items-center p-4 bg-black bg-opacity-50">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-xl flex flex-col">
+            <div className="flex sticky top-0 justify-between items-center p-4 bg-white border-b md:p-6 z-10">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-100 rounded-lg">
+                  <CheckCircle className="w-6 h-6 text-purple-600" />
                 </div>
-              ))
-            ) : (
-              <div className="p-12 text-center bg-white rounded-xl">
-                <p className="text-gray-500">
-                  No {activeTab === "pending" ? "pending" : "history"} indents
-                  found matching your search
-                </p>
+                <h2 className="text-xl font-bold text-gray-900 md:text-2xl">
+                  Bulk Approval ({bulkItemsToApprove.length} items)
+                </h2>
               </div>
-            )}
+              <button
+                onClick={() => {
+                  setShowBulkModal(false);
+                  setBulkItemsToApprove([]);
+                }}
+                className="p-1 text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-6 md:p-6 overflow-y-auto">
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 bg-gray-50 p-4 rounded-xl border border-gray-100">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Approved By <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={selectedApprovalName}
+                      onChange={(e) => setSelectedApprovalName(e.target.value)}
+                      className="w-full p-3 bg-white border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none appearance-none pr-10"
+                    >
+                      <option value="">Select Approval Name</option>
+                      {approvalNames.map((name) => (
+                        <option key={name} value={name}>
+                          {name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+                  </div>
+                </div>
+                <div className="flex items-center">
+                  <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 w-full">
+                    <p className="text-sm text-blue-700">
+                      <strong>Note:</strong> All selected items will be marked as "Approved" with the selected name and current timestamp.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="max-h-96 overflow-y-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Indent No</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Shop</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Item Name</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Order Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {bulkItemsToApprove.map((item) => (
+                        <tr key={getIndentKey(item)} className="hover:bg-gray-50 transition-colors">
+                          <td className="px-4 py-3 text-sm font-medium text-gray-900">{item.indentNumber}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">{item.shopName}</td>
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            <div className="truncate max-w-xs" title={item.itemName}>{item.itemName}</div>
+                          </td>
+                          <td className="px-4 py-3 text-sm text-right font-semibold text-blue-600">
+                            {formatNumber(item.reorderQuantityPcs)} Pcs
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse gap-3 p-4 md:flex-row md:justify-end md:p-6 bg-gray-50 border-t">
+              <button
+                onClick={() => {
+                  setShowBulkModal(false);
+                  setBulkItemsToApprove([]);
+                }}
+                className="px-6 py-2.5 w-full text-gray-700 font-medium rounded-lg border border-gray-300 bg-white md:w-auto hover:bg-gray-50 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmBulkApprove}
+                disabled={!selectedApprovalName || isApproving}
+                className="flex gap-2 justify-center items-center px-8 py-2.5 w-full text-white font-bold bg-purple-600 rounded-lg shadow-lg md:w-auto hover:bg-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed transform active:scale-95"
+              >
+                {isApproving ? (
+                  <>
+                    <div className="w-5 h-5 rounded-full border-2 border-white animate-spin border-t-transparent" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-5 h-5" />
+                    <span>Confirm Approval</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1463,165 +1173,54 @@ export const ApprovalPage: React.FC = () => {
             </div>
 
             <div className="p-4 space-y-4 md:p-6">
-              {/* Indent Number - Read Only */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Indent Number
-                </label>
-                <input
-                  type="text"
-                  value={selectedIndent.indentNumber}
-                  readOnly
-                  className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300"
-                />
+                <label className="block mb-2 text-sm font-medium text-gray-700">Indent Number</label>
+                <input type="text" value={selectedIndent.indentNumber} readOnly className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300" />
               </div>
-
-              {/* SKU Code - Read Only */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  SKU Code
-                </label>
-                <input
-                  type="text"
-                  value={selectedIndent.skuCode}
-                  readOnly
-                  className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300"
-                />
+                <label className="block mb-2 text-sm font-medium text-gray-700">SKU Code</label>
+                <input type="text" value={selectedIndent.skuCode} readOnly className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300" />
               </div>
-
-              {/* Item Name - Read Only */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Item Name
-                </label>
-                <input
-                  type="text"
-                  value={selectedIndent.itemName}
-                  readOnly
-                  className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300"
-                />
+                <label className="block mb-2 text-sm font-medium text-gray-700">Item Name</label>
+                <input type="text" value={selectedIndent.itemName} readOnly className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300" />
               </div>
-
-              {/* Brand Name - Read Only */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Brand Name
-                </label>
-                <input
-                  type="text"
-                  value={selectedIndent.brandName}
-                  readOnly
-                  className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300"
-                />
+                <label className="block mb-2 text-sm font-medium text-gray-700">Brand Name</label>
+                <input type="text" value={selectedIndent.brandName} readOnly className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300" />
               </div>
-
-              {/* Reorder Quantity (Pcs) - Read Only */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Reorder Quantity (Pcs)
-                </label>
-                <input
-                  type="text"
-                  value={selectedIndent.reorderQuantityPcs}
-                  readOnly
-                  className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300"
-                />
+                <label className="block mb-2 text-sm font-medium text-gray-700">Reorder Quantity (Pcs)</label>
+                <input type="text" value={selectedIndent.reorderQuantityPcs} readOnly className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300" />
               </div>
-
-              {/* Reorder Quantity (Box) - Read Only */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Reorder Quantity (Box)
-                </label>
-                <input
-                  type="text"
-                  value={selectedIndent.reorderQuantityBox}
-                  readOnly
-                  className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300"
-                />
+                <label className="block mb-2 text-sm font-medium text-gray-700">Reorder Quantity (Box)</label>
+                <input type="text" value={selectedIndent.reorderQuantityBox} readOnly className="px-4 py-2 w-full text-sm text-gray-700 bg-gray-50 rounded-lg border border-gray-300" />
               </div>
-
-              {/* Shop Manager Status - Dropdown */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Shop Manager Status <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={shopManagerStatus}
-                  onChange={(e) => setShopManagerStatus(e.target.value)}
-                  className="px-4 py-2 w-full text-sm rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
+                <label className="block mb-2 text-sm font-medium text-gray-700">Shop Manager Status <span className="text-red-500">*</span></label>
+                <select value={shopManagerStatus} onChange={(e) => setShopManagerStatus(e.target.value)} className="px-4 py-2 w-full text-sm rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="Approved">Approved</option>
                   <option value="Reject">Reject</option>
                 </select>
               </div>
-
-              {/* Approval Name - Dropdown */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Approval Name <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={selectedApprovalName}
-                  onChange={(e) => setSelectedApprovalName(e.target.value)}
-                  className="px-4 py-2 w-full text-sm rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                >
+                <label className="block mb-2 text-sm font-medium text-gray-700">Approval Name <span className="text-red-500">*</span></label>
+                <select value={selectedApprovalName} onChange={(e) => setSelectedApprovalName(e.target.value)} className="px-4 py-2 w-full text-sm rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500" required>
                   <option value="">Select Approval Name</option>
-                  {approvalNames.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
-                    </option>
-                  ))}
+                  {approvalNames.map((name) => (<option key={name} value={name}>{name}</option>))}
                 </select>
               </div>
-
-              {/* Remarks - Input */}
               <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Remarks
-                </label>
-                <textarea
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  placeholder="Enter any remarks or comments..."
-                  rows={4}
-                  className="px-4 py-2 w-full text-sm rounded-lg border border-gray-300 outline-none resize-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+                <label className="block mb-2 text-sm font-medium text-gray-700">Remarks</label>
+                <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Enter any remarks or comments..." rows={4} className="px-4 py-2 w-full text-sm rounded-lg border border-gray-300 outline-none resize-none focus:ring-2 focus:ring-blue-500" />
               </div>
-
-              {/* Action Buttons */}
-              <button
-                onClick={() => {
-                  setShowModal(false);
-                  setSelectedIndent(null);
-                  setShopManagerStatus("Approved");
-                  setRemarks("");
-                }}
-                className="px-6 py-2 w-full font-medium text-gray-700 rounded-lg border border-gray-300 transition-colors duration-200 sm:w-auto hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveApproval}
-                disabled={isApproving}
-                className={`flex gap-2 justify-center items-center px-6 py-2 w-full font-medium text-white rounded-lg transition-colors duration-200 sm:w-auto ${isApproving
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700"
-                  }`}
-              >
-                {isApproving ? (
-                  <>
-                    <div className="w-4 h-4 rounded-full border-2 border-white animate-spin border-t-transparent" />
-                    Saving...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="w-4 h-4" />
-                    Save
-                  </>
-                )}
-              </button>
+              <div className="flex gap-3 justify-end pt-4">
+                <button onClick={() => { setShowModal(false); setSelectedIndent(null); }} className="px-6 py-2 font-medium text-gray-700 rounded-lg border border-gray-300 hover:bg-gray-50">Cancel</button>
+                <button onClick={handleSaveApproval} disabled={isApproving} className="px-6 py-2 font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  {isApproving ? "Saving..." : "Save"}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
   Package,
@@ -89,6 +90,8 @@ interface IndentItem {
     vehicleNo?: string;
     liftingCompletedAt?: string;
   };
+  planned6?: string;
+  actual6?: string;
 }
 
 interface ColumnVisibility {
@@ -145,7 +148,10 @@ export const GetLiftingPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
-  const [searchTerm, setSearchTerm] = useState("");
+  const [searchParams] = useSearchParams();
+  const rawToken = searchParams.get("token");
+  const urlSearch = rawToken ? atob(rawToken) : (searchParams.get("search") || "");
+  const [searchTerm, setSearchTerm] = useState(urlSearch);
   const [selectedRows, setSelectedRows] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   const [editingPoQtyId, setEditingPoQtyId] = useState<string | null>(null);
@@ -157,6 +163,7 @@ export const GetLiftingPage = () => {
     isOpen: false,
     type: null,
   });
+  const [isSubmitted, setIsSubmitted] = useState(false);
 
   // Camera capture for single and bulk
   const capturePhoto = useCallback(() => {
@@ -377,34 +384,18 @@ export const GetLiftingPage = () => {
       return;
     }
     const now = formatTimestamp(new Date());
-    const updated = indents.map((i) => {
-      const match = bulkIndents.find((b) => b.id === i.id);
-      if (!match) return i;
-      return {
-        ...i,
-        status: "lifting",
-        actualAF: now,
-        isLifting: true,
-        plannedAK: now, // Set so item appears in Receiving pending tab
-        liftingData: {
-          transportCopy: bulkFormData.transportCopyUrl || "",
-          billCopy: bulkFormData.billCopyUrl || "",
-          qty: (match.poQty ?? 0).toString(),
-          liftingCompletedAt: now,
-        },
-      };
-    });
-    setIndents(updated);
-    setShowBulkModal(false);
+    setSubmittingBulk(true);
 
     try {
       for (const indent of bulkIndents) {
         const updateData = {
           status: "lifting",
-          actualAF: now,
+          actual6: now,
+          planned7: now, // Set Planned 7 (BC) for receiving stage
           shopName: indent.shopName,
+          transporterName: indent.transporterName || "",
           isLifting: true,
-          plannedAK: now, // Set so item appears in Receiving pending tab
+          plannedAK: now,
           liftingData: {
             transportCopy: bulkFormData.transportCopyUrl || "",
             billCopy: bulkFormData.billCopyUrl || "",
@@ -414,24 +405,48 @@ export const GetLiftingPage = () => {
         } as any;
         await indentService.updateIndent(indent.id, updateData);
         const saved = localStorage.getItem("indent_approval_data");
-        const localIndents: IndentItem[] = saved ? JSON.parse(saved) : [];
-        const updatedLocal = localIndents.map((i) =>
-          i.id === indent.id ? { ...i, ...updateData } : i
-        );
-        localStorage.setItem(
-          "indent_approval_data",
-          JSON.stringify(updatedLocal)
-        );
+        let localIndents: IndentItem[] = saved ? JSON.parse(saved) : [];
+        const index = localIndents.findIndex(i => i.id === indent.id);
+        if (index !== -1) {
+          localIndents[index] = { ...localIndents[index], ...updateData };
+        } else {
+          localIndents.push({ ...indent, ...updateData } as any);
+        }
+        localStorage.setItem("indent_approval_data", JSON.stringify(localIndents));
       }
+
+      // Update local state
+      const updated = indents.map((i) => {
+        const match = bulkIndents.find((b) => b.id === i.id);
+        if (!match) return i;
+        return {
+          ...i,
+          status: "lifting",
+          actual6: now,
+          planned7: now,
+          isLifting: true,
+          liftingData: {
+            transportCopy: bulkFormData.transportCopyUrl || "",
+            billCopy: bulkFormData.billCopyUrl || "",
+            qty: (match.poQty ?? 0).toString(),
+            liftingCompletedAt: now,
+          },
+        };
+      });
+      setIndents(updated);
+      setShowBulkModal(false);
       setSuccessMessage(`Lifting completed for ${bulkIndents.length} indents.`);
       setTimeout(() => setSuccessMessage(""), 5000);
       setBulkIndents([]);
       setSelectedRows([]);
-      setTimeout(() => window.location.reload(), 500);
+      setIsSubmitted(true);
+      // Removed window.location.reload() to show the success screen
     } catch (err) {
       console.error("Bulk submit error:", err);
       setErrorMessage("Failed to complete bulk lifting. Please try again.");
       setTimeout(() => setErrorMessage(""), 5000);
+    } finally {
+      setSubmittingBulk(false);
     }
   };
 
@@ -439,16 +454,16 @@ export const GetLiftingPage = () => {
     fetchIndents();
   }, []);
 
-  // Filters based on Planned AE & Actual AF
+  // Filters based on Planned 6 & Actual 6
   const basePendingIndents = useMemo(() => indents.filter((i) => {
-    const hasPlanned = i.plannedAE && String(i.plannedAE).trim().length > 0;
-    const hasActual = i.actualAF && String(i.actualAF).trim().length > 0;
+    const hasPlanned = i.planned6 && String(i.planned6).trim().length > 0 && String(i.planned6).toLowerCase() !== "null";
+    const hasActual = i.actual6 && String(i.actual6).trim().length > 0 && String(i.actual6).toLowerCase() !== "null";
     return hasPlanned && !hasActual;
   }), [indents]);
 
   const baseHistoryIndents = useMemo(() => indents.filter((i) => {
-    const hasActual = i.actualAF && String(i.actualAF).trim().length > 0;
-    return hasActual; // If AF is not null, show in history
+    const hasActual = i.actual6 && String(i.actual6).trim().length > 0 && String(i.actual6).toLowerCase() !== "null";
+    return hasActual; // If AW is not null, show in history
   }), [indents]);
 
   // Clear filter when changing tabs
@@ -525,14 +540,15 @@ export const GetLiftingPage = () => {
   const filterIndents = (indents: IndentItem[]) => {
     return indents.filter((indent) => {
       const searchLower = searchTerm.toLowerCase();
-      const searchMatch =
-        indent.indentNumber?.toLowerCase().includes(searchLower) ||
-        indent.skuCode?.toLowerCase().includes(searchLower) ||
-        indent.itemName?.toLowerCase().includes(searchLower) ||
-        indent.brandName?.toLowerCase().includes(searchLower) ||
-        indent.traderName?.toLowerCase().includes(searchLower) ||
-        indent.shopName?.toLowerCase().includes(searchLower) ||
-        indent.orderBy?.toLowerCase().includes(searchLower);
+      const searchMatch = urlSearch && searchTerm === urlSearch
+        ? (indent.indentNumber?.toLowerCase() === searchLower)
+        : (indent.indentNumber?.toLowerCase().includes(searchLower) ||
+           indent.skuCode?.toLowerCase().includes(searchLower) ||
+           indent.itemName?.toLowerCase().includes(searchLower) ||
+           indent.brandName?.toLowerCase().includes(searchLower) ||
+           indent.traderName?.toLowerCase().includes(searchLower) ||
+           indent.shopName?.toLowerCase().includes(searchLower) ||
+           indent.orderBy?.toLowerCase().includes(searchLower));
 
       let fieldMatch = true;
       if (filterField && (filterValue.trim() || filterSearch.trim())) {
@@ -592,6 +608,26 @@ export const GetLiftingPage = () => {
     const isAllSelected = allIds.every((id) => selectedRows.includes(id));
     setSelectAll(isAllSelected);
   }, [selectedRows, currentIndents]);
+
+  // === AUTO TRIGGER BULK MODAL FOR PUBLIC LINKS ===
+  const [hasAutoTriggered, setHasAutoTriggered] = useState(false);
+  useEffect(() => {
+    if (urlSearch && pendingIndents.length > 0 && !hasAutoTriggered && activeTab === "pending") {
+      // Strictly filter for exact indent number match to avoid partial matches showing multiple rows
+      const exactMatches = pendingIndents.filter(i => 
+        (i.indentNumber || "").trim().toLowerCase() === urlSearch.trim().toLowerCase()
+      );
+
+      if (exactMatches.length > 0) {
+        console.log("🚀 Auto-triggering bulk modal for exact match:", urlSearch);
+        const matchedIds = exactMatches.map(i => i.id);
+        setSelectedRows(matchedIds);
+        setBulkIndents(exactMatches);
+        setShowBulkModal(true);
+        setHasAutoTriggered(true);
+      }
+    }
+  }, [urlSearch, pendingIndents, hasAutoTriggered, activeTab]);
 
   // Keep edit mode active until user saves (Enter) or cancels (Escape/X)
   // Intentionally no outside-click handler to avoid unintended closures while typing or clicking
@@ -668,22 +704,22 @@ export const GetLiftingPage = () => {
     }
   };
 
+  const [isSubmittingLifting, setIsSubmittingLifting] = useState(false);
+
   const handleSubmitLifting = async () => {
-    console.log("Starting lifting submission");
-    console.log("Form data:", formData);
-    console.log("Selected indent:", selectedIndent);
     if (!selectedIndent || !formData.qty) return;
 
-    // Optimistic update: Update local state immediately
     const now = formatTimestamp(new Date());
-    console.log("Current timestamp:", now);
+    setIsSubmittingLifting(true);
 
     const updateData = {
       status: "lifting",
-      actualAF: now,
+      actual6: now,
+      planned7: now, // Set Planned 7 (BC) for receiving stage
       shopName: selectedIndent.shopName,
+      transporterName: selectedIndent.transporterName || "",
       isLifting: true,
-      plannedAK: now, // Set so item appears in Receiving pending tab
+      plannedAK: now,
       liftingData: {
         transportCopy: formData.transportCopyUrl || "",
         billCopy: formData.billCopyUrl || "",
@@ -691,73 +727,44 @@ export const GetLiftingPage = () => {
         liftingCompletedAt: now,
       },
     };
-    console.log("Update data being sent:", updateData);
 
-    const updatedIndents = indents.map((i) =>
-      i.id === selectedIndent.id ? { ...i, ...updateData } : i
-    );
-
-    setIndents(updatedIndents);
-    setShowModal(false);
-    setSelectedIndent(null);
-    setFormData({
-      transportCopy: null,
-      qty: "",
-      billCopy: null,
-      transportCopyUrl: undefined,
-      billCopyUrl: undefined,
-    });
-
-    // Show success message immediately
-    setSuccessMessage(
-      `Lifting completed successfully for indent ${selectedIndent.indentNumber}.`
-    );
-    setTimeout(() => setSuccessMessage(""), 5000);
-
-    // Perform background operations
     try {
-      // Update Google Sheets
-      console.log("Calling indentService.updateIndent");
+      // Wait for sheet submission
       await indentService.updateIndent(selectedIndent.id, updateData);
-      console.log("Google Sheets update completed successfully");
+
+      // Update local state after success
+      const updatedIndents = indents.map((i) =>
+        i.id === selectedIndent.id ? { ...i, ...updateData, planned7: now } : i
+      );
+      setIndents(updatedIndents);
 
       // Update localStorage
       const saved = localStorage.getItem("indent_approval_data");
-      const localIndents: IndentItem[] = saved ? JSON.parse(saved) : [];
-      const updatedLocal = localIndents.map((i) =>
-        i.id === selectedIndent.id ? { ...i, ...updateData } : i
-      );
-      localStorage.setItem(
-        "indent_approval_data",
-        JSON.stringify(updatedLocal)
-      );
-      console.log("LocalStorage updated");
-      console.log("Lifting submission completed successfully");
+      let localIndents: IndentItem[] = saved ? JSON.parse(saved) : [];
+      
+      const index = localIndents.findIndex(i => i.id === selectedIndent.id);
+      if (index !== -1) {
+        localIndents[index] = { ...localIndents[index], ...updateData };
+      } else {
+        // If not found, add it from the selected indent + updates
+        localIndents.push({ ...selectedIndent, ...updateData } as any);
+      }
+      localStorage.setItem("indent_approval_data", JSON.stringify(localIndents));
 
-      // Automatically refresh page after successful submission to reload updated data
-      setTimeout(() => {
-        window.location.reload();
-      }, 500); // 0.5 second delay for faster feedback
+      // Close modal and show success
+      setShowModal(false);
+      setSelectedIndent(null);
+      setFormData({ transportCopy: null, qty: "", billCopy: null, transportCopyUrl: undefined, billCopyUrl: undefined });
+      setSuccessMessage(`Lifting completed successfully for indent ${selectedIndent.indentNumber}.`);
+      setTimeout(() => setSuccessMessage(""), 5000);
+      setTimeout(() => window.location.reload(), 500);
+
     } catch (err: any) {
       console.error("Submit error:", err);
-      // Revert optimistic update on failure
-      const revertedIndents = indents.map((i) => {
-        if (i.id === selectedIndent.id) {
-          return {
-            ...i,
-            status: i.status || "",
-            actualAF: i.actualAF || "",
-            shopName: i.shopName || "",
-            isLifting: false,
-            liftingData: i.liftingData || undefined,
-          };
-        }
-        return i;
-      });
-      setIndents(revertedIndents);
-      setSuccessMessage(""); // Clear success message
       setErrorMessage("Failed to complete lifting. Please try again.");
       setTimeout(() => setErrorMessage(""), 5000);
+    } finally {
+      setIsSubmittingLifting(false);
     }
   };
 
@@ -1247,6 +1254,29 @@ export const GetLiftingPage = () => {
       <div className="flex flex-col justify-center items-center p-6 min-h-screen">
         <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
         <p className="mt-3 text-gray-600">Loading indents...</p>
+      </div>
+    );
+  }
+
+  // === SUCCESS SCREEN LOGIC ===
+  const isPublic = window.location.pathname.includes("/public/");
+  const alreadyLifted = urlSearch && historyIndents.some(i => 
+    (i.indentNumber || "").trim().toLowerCase() === urlSearch.trim().toLowerCase()
+  );
+
+  if (isSubmitted || (isPublic && alreadyLifted)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="bg-white p-10 rounded-3xl shadow-2xl max-w-md w-full text-center animate-in fade-in zoom-in">
+          <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+            <CheckCircle className="w-12 h-12 text-green-600" />
+          </div>
+          <h2 className="text-3xl font-black text-gray-900 mb-2">Form Submitted</h2>
+          <p className="text-gray-600 text-lg">The lifting form for this indent has been submitted successfully.</p>
+          <div className="mt-8 pt-6 border-t border-gray-100">
+            <p className="text-sm text-gray-400 font-medium italic">Thank you for your response.</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -1930,11 +1960,19 @@ export const GetLiftingPage = () => {
                   disabled={
                     !formData.qty ||
                     !formData.transportCopyUrl ||
-                    !formData.billCopyUrl
+                    !formData.billCopyUrl ||
+                    isSubmittingLifting
                   }
-                  className="flex justify-center items-center px-6 py-2 w-full text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 md:w-auto"
+                  className="flex justify-center items-center gap-2 px-6 py-2 w-full text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 md:w-auto"
                 >
-                  Submit Lifting
+                  {isSubmittingLifting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    "Submit Lifting"
+                  )}
                 </button>
               </div>
             </div>
