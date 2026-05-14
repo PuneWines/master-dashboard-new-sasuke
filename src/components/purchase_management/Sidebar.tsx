@@ -46,8 +46,8 @@ const PAGE_ROUTES: Record<string, string> = {
   'purchase-order': '/purchase_management/purchase-order',
   'trader-verification': '/purchase_management/trader-verification',
   'transporter-verification': '/purchase_management/transporter-verification',
-  'get-lifting': '/purchase_management/get-lifting',
   'cross-check': '/purchase_management/cross-check',
+  'master': '/purchase_management/master',
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -65,8 +65,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'purchase-order', label: 'Generate & Send PO', icon: Send },
     { id: 'trader-verification', label: 'Trader Verification', icon: CheckCircle },
     { id: 'transporter-verification', label: 'Transporter Verification', icon: Truck },
-    { id: 'get-lifting', label: 'Get Lifting', icon: Truck },
     { id: 'cross-check', label: 'Cross Check & Receive', icon: Package },
+    { id: 'master', label: 'Master', icon: User },
   ];
 
   // Filter menu items based on user permissions

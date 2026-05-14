@@ -97,11 +97,13 @@ interface POGenerateModalProps {
     receiverManager: string,
     remarks: string,
     items: POIndentItem[],
-    companyName: string
+    companyName: string,
+    forcedPONumber: string
   ) => void;
   indents: POIndentItem[];
   processedIndentNumbers: Set<string>;
   isSubmitting?: boolean;
+  preGeneratedPONumber: string; // Pass the number from parent
 }
 
 const POGenerateModal: React.FC<POGenerateModalProps> = ({
@@ -111,26 +113,11 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
   indents,
   processedIndentNumbers,
   isSubmitting = false,
+  preGeneratedPONumber,
 }) => {
   const today = new Date();
 
-  // Generate sequential PO number instead of random
-  const getNextPONumber = () => {
-    const existingNumbers = indents
-      .map((i) => i.poNumber)
-      .filter(Boolean)
-      .map((po) => {
-        const match = po?.match(/PO-(\d{4})-(\d{3})/);
-        return match ? parseInt(match[2], 10) : 0;
-      });
-
-    const highestNumber =
-      existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0;
-    const nextNumber = (highestNumber + 1).toString().padStart(3, "0");
-    return `PO-${new Date().getFullYear()}-${nextNumber}`;
-  };
-
-  const poNumber = getNextPONumber();
+  const poNumber = preGeneratedPONumber;
 
   const [companyName, setCompanyName] = useState("");
 
@@ -388,7 +375,8 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
                     receiverManager,
                     remarks,
                     finalVisibleIndents,
-                    companyName
+                    companyName,
+                    poNumber
                   )
                 }
                 disabled={!transporterName.trim() || !receiverManager.trim() || isSubmitting}
@@ -455,23 +443,25 @@ const TableRow: React.FC<TableRowProps> = ({
   <tr className="hover:bg-gray-50">
     {columnVisibility.action && (
       <td className="px-6 py-4">
-        {activeTab === "pending" ? (
-          <button
-            onClick={() => handleGeneratePO(indent)}
-            className="flex gap-1 items-center px-3 py-1 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700"
-          >
-            <Send className="w-4 h-4" />
-            Generate PO
-          </button>
-        ) : (
-          <button
-            onClick={() => handleViewHistory(indent)}
-            className="flex gap-1 items-center px-3 py-1 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-          >
-            <Eye className="w-4 h-4" />
-            View
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {activeTab === "pending" ? (
+            <button
+              onClick={() => handleGeneratePO(indent)}
+              className="flex gap-1 items-center px-3 py-1 text-sm text-white bg-green-600 rounded-lg hover:bg-green-700 shadow-sm"
+            >
+              <Send className="w-4 h-4" />
+              Generate PO
+            </button>
+          ) : (
+            <button
+              onClick={() => handleViewHistory(indent)}
+              className="flex gap-1 items-center px-3 py-1 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-sm"
+            >
+              <Eye className="w-4 h-4" />
+              View
+            </button>
+          )}
+        </div>
       </td>
     )}
     {columnVisibility.indentNumber && (
@@ -754,21 +744,22 @@ export const PurchaseOrderPage: React.FC = () => {
     receiverManager: string,
     remarks: string,
     items: POIndentItem[],
-    companyName: string
+    companyName: string,
+    forcedPONumber?: string
   ) => {
-    if (!selectedIndent) return;
+    if (!selectedIndent && items.length === 0) return;
 
     setIsSubmitting(true);
     setErrorMessage("");
     console.log("✅ Validation passed, preparing backend update");
 
     try {
-      const poNumberForSubmit = getNextPONumber();
+      const poNumberForSubmit = forcedPONumber || getNextPONumber();
       let poCopyLink = "";
       let receiverSlipLink = "";
 
       // 1. Generate PDFs (Parallel)
-      const tradeName = selectedIndent.traderName;
+      const tradeName = items[0]?.traderName || selectedIndent?.traderName || "";
       const basePoData = {
         poNumber: poNumberForSubmit,
         companyName,
@@ -808,8 +799,8 @@ export const PurchaseOrderPage: React.FC = () => {
         console.error("Error generating PDFs:", error);
       }
 
-      const currentIndentNo = (selectedIndent.indentNumber || "").trim();
-      const currentShopName = (selectedIndent.shopName || "").trim();
+      const currentIndentNo = (items[0]?.indentNumber || "").trim();
+      const currentShopName = (items[0]?.shopName || "").trim();
       console.log("🔗 PDFs generated and uploaded", { poCopyLink, receiverSlipLink });
 
       // 2. Prepare common updates
@@ -817,7 +808,7 @@ export const PurchaseOrderPage: React.FC = () => {
       const currentDate = formatTimestamp(new Date());
 
       // ... existing phone lookup logic ...
-      const traderNameKey = selectedIndent.traderName || "";
+      const traderNameKey = tradeName;
       const transporterNameKey = transporterName.trim();
       
       const vendorEntry = vendorMasterData.find(
@@ -860,6 +851,8 @@ export const PurchaseOrderPage: React.FC = () => {
       const autoTraderPhone = poTraderMatch?.traderPhone || vendorEntry?.traderPhone || selectedIndent?.traderPhone || "";
       const autoTransporterPhone = poTransporterMatch?.transporterPhone || transporterEntry?.transporterPhone || selectedIndent?.transporterPhone || "";
       const autoReceiverPhone = poReceiverMatch?.receiverPhone || receiverEntry?.receiverPhone || vendorEntry?.receiverPhone || "";
+
+      console.log(`🚀 Using PO Number: ${poNumberForSubmit} for ${items.length} items`);
 
       // 3. Update backend for each item
       const updatePromises = items.map(async (item) => {
@@ -1096,7 +1089,11 @@ export const PurchaseOrderPage: React.FC = () => {
               <table className="w-full text-sm text-left text-gray-500">
                 <thead className="text-xs text-gray-700 uppercase bg-gray-50">
                   <tr>
-                    {columnVisibility.action && <th className="px-6 py-3">Action</th>}
+                    {columnVisibility.action && (
+                      <th className="px-6 py-3">
+                        <span>Action</span>
+                      </th>
+                    )}
                     {columnVisibility.indentNumber && <th className="px-6 py-3">Indent #</th>}
                     {columnVisibility.approvalDate && <th className="px-6 py-3">Appr. Date</th>}
                     {columnVisibility.skuCode && <th className="px-6 py-3">SKU</th>}
@@ -1141,6 +1138,7 @@ export const PurchaseOrderPage: React.FC = () => {
               indents={indents}
               processedIndentNumbers={processedIndentNumbers}
               isSubmitting={isSubmitting}
+              preGeneratedPONumber={getNextPONumber()}
             />
           )}
 

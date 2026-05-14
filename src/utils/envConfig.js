@@ -12,6 +12,7 @@ export const SCRIPT_URLS = {
   HR_PAYROLL: getScriptURL(import.meta.env.VITE_HR_PAYROLL_ATTENDANCE_ID),
   PURCHASE: getScriptURL(import.meta.env.VITE_PURCHASE_MANAGEMENT_ID),
   HR_ATTENDANCE_SYNC: getScriptURL(import.meta.env.VITE_HR_ATTENDANCE_SYNC_ID),
+  WHATSAPP_SEND: getScriptURL(import.meta.env.VITE_WHATSAPP_SEND_MESSAGE_ID),
 };
 
 // Device Logs API URL - uses proxy in both dev and production to avoid Mixed Content errors
@@ -25,4 +26,5 @@ export const SCRIPT_IDS = {
   HR_PAYROLL: import.meta.env.VITE_HR_PAYROLL_ATTENDANCE_ID,
   PURCHASE: import.meta.env.VITE_PURCHASE_MANAGEMENT_ID,
   HR_ATTENDANCE_SYNC: import.meta.env.VITE_HR_ATTENDANCE_SYNC_ID,
+  WHATSAPP_SEND: import.meta.env.VITE_WHATSAPP_SEND_MESSAGE_ID,
 };

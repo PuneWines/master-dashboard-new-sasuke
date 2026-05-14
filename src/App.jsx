@@ -51,8 +51,8 @@ import { ApprovalPage as PurchaseApproval } from "./pages/purchase_management/Ap
 import { PurchaseOrderPage as PurchaseOrder } from "./pages/purchase_management/PurchaseOrderPage";
 import { TraderVerification } from "./pages/purchase_management/TraderVerification";
 import { TransporterVerification } from "./pages/purchase_management/TransporterVerification";
-import { GetLiftingPage as PurchaseLifting } from "./pages/purchase_management/GetLiftingPage";
 import { CrossCheckPage as PurchaseCrossCheck } from "./pages/purchase_management/CrossCheckPage";
+import { MasterPage as PurchaseMasterPage } from "./pages/purchase_management/MasterPage";
 
 // ── Petty Cash Pages ──
 import PettyCashApp from "./pages/petty-cash/App";
@@ -176,7 +176,6 @@ function App() {
           {/* Public Workflow Forms (Purchase Management) */}
           <Route path="/public/trader-form" element={<TraderForm />} />
           <Route path="/public/transporter-form" element={<TransporterForm />} />
-          <Route path="/public/get-lifting" element={<PurchaseLifting />} />
 
           {/* ════════════════════════════════════════
               MASTER DASHBOARD
@@ -381,8 +380,8 @@ function App() {
             <Route path="purchase-order"      element={<PurchaseOrder />} />
             <Route path="trader-verification" element={<TraderVerification />} />
             <Route path="transporter-verification" element={<TransporterVerification />} />
-            <Route path="get-lifting"         element={<PurchaseLifting />} />
             <Route path="cross-check"         element={<PurchaseCrossCheck />} />
+            <Route path="master"              element={<PurchaseMasterPage />} />
           </Route>
 
           {/* ════════════════════════════════════════

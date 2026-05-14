@@ -102,11 +102,19 @@ const Dashboard = () => {
     return null;
   };
 
+  const HR_SPREADSHEET_ID = '1d10niZ9MX1DIVpSqplzANqPylPTYiXq7TYSYSRNaBUg';
+
   const fetchJoiningCount = async () => {
     try {
-      const response = await fetch(
-        `${SCRIPT_URLS.HR_JOINING}?sheet=JOINING&action=fetch`
-      );
+      const response = await fetch(SCRIPT_URLS.HR_JOINING, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({
+          action: "fetch",
+          sheet: "JOINING",
+          spreadsheetId: HR_SPREADSHEET_ID
+        })
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -218,9 +226,15 @@ const Dashboard = () => {
 
   const fetchLeaveCount = async () => {
     try {
-      const response = await fetch(
-        `${SCRIPT_URLS.HR_JOINING}?sheet=LEAVING&action=fetch`
-      );
+      const response = await fetch(SCRIPT_URLS.HR_JOINING, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: JSON.stringify({
+          action: "fetch",
+          sheet: "LEAVING",
+          spreadsheetId: HR_SPREADSHEET_ID
+        })
+      });
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

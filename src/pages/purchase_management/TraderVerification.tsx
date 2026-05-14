@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Clock, FileText, AlertCircle, CheckCircle, Clock4 } from 'lucide-react';
+import { Search, Clock, FileText, AlertCircle, CheckCircle, Clock4, History } from 'lucide-react';
 import { format } from 'date-fns';
 import { indentService } from '../../services/purchase_management/indentService';
 
@@ -7,6 +7,7 @@ export const TraderVerification: React.FC = () => {
   const [indents, setIndents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
 
   useEffect(() => {
     const fetchIndents = async () => {
@@ -32,6 +33,12 @@ export const TraderVerification: React.FC = () => {
       const isVisible = hasValue(item.planned4) && hasValue(item.actual4);
       if (!isVisible) return false;
 
+      // History Condition: Shift to history if Trader Status is "Yes"
+      const isHistory = String(item.traderStatus || "").trim().toLowerCase() === "yes";
+      
+      if (activeTab === 'pending' && isHistory) return false;
+      if (activeTab === 'history' && !isHistory) return false;
+
       const searchLower = searchTerm.toLowerCase();
       return (
         item.indentNumber?.toLowerCase().includes(searchLower) ||
@@ -42,7 +49,7 @@ export const TraderVerification: React.FC = () => {
         item.shopName?.toLowerCase().includes(searchLower)
       );
     });
-  }, [indents, searchTerm]);
+  }, [indents, searchTerm, activeTab]);
 
   const formatDate = (dateStr?: string) => {
     if (!dateStr || dateStr.trim() === "" || dateStr.toLowerCase() === "null") return "-";
@@ -75,16 +82,44 @@ export const TraderVerification: React.FC = () => {
           </p>
         </div>
         
-        <div className="relative group">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-          <input
-            type="text"
-            placeholder="Search all columns..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full md:w-80 pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all text-slate-600"
-          />
+        <div className="flex flex-col md:flex-row gap-4 items-center">
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+            <input
+              type="text"
+              placeholder="Search all columns..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full md:w-80 pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none shadow-sm transition-all text-slate-600"
+            />
+          </div>
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-4 mb-6">
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${
+            activeTab === 'pending'
+              ? 'bg-blue-600 text-white shadow-lg shadow-blue-200'
+              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-100'
+          }`}
+        >
+          <Clock className="w-5 h-5" />
+          Pending Records
+        </button>
+        <button
+          onClick={() => setActiveTab('history')}
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${
+            activeTab === 'history'
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-200'
+              : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-100'
+          }`}
+        >
+          <History className="w-5 h-5" />
+          History (Verified)
+        </button>
       </div>
 
       {loading ? (
@@ -95,11 +130,15 @@ export const TraderVerification: React.FC = () => {
       ) : filteredIndents.length === 0 ? (
         <div className="bg-white rounded-3xl p-16 text-center border border-slate-100 shadow-sm">
           <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <FileText className="text-slate-300 w-10 h-10" />
+            {activeTab === 'pending' ? <FileText className="text-slate-300 w-10 h-10" /> : <CheckCircle className="text-emerald-300 w-10 h-10" />}
           </div>
-          <h3 className="text-xl font-bold text-slate-900 mb-2">No Records Found</h3>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">
+            {activeTab === 'pending' ? 'No Pending Records' : 'No History Found'}
+          </h3>
           <p className="text-slate-500 max-w-sm mx-auto">
-            Currently no orders match the required verification criteria (Planned 4 & Actual 4 visibility).
+            {activeTab === 'pending' 
+              ? 'Currently no orders match the required verification criteria.' 
+              : 'Records will appear here once Trader Status is marked as "Yes".'}
           </p>
         </div>
       ) : (
@@ -158,6 +197,7 @@ export const TraderVerification: React.FC = () => {
                     </td>
                     <td className="px-4 py-4">
                       <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
+                        item.traderStatus === 'Yes' ? 'bg-emerald-100 text-emerald-700' : 
                         item.traderStatus === 'Accepted' ? 'bg-blue-100 text-blue-700' : 
                         item.traderStatus === 'Rejected' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
                       }`}>

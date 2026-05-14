@@ -21,18 +21,15 @@ interface DashboardStats {
   totalPO: number;
   totalQtyReceived: number;
   totalPOPending: number;
-  totalLifting: number;
-  totalLiftPending: number;
   totalPOSum: number;
   totalPOPendingCount: number;
-  totalLiftingCount: number;
-  totalLiftPendingCount: number;
 }
 
 interface PendingCounts {
   approvals: number;
   pos: number;
-  lifting: number;
+  trader: number;
+  transporter: number;
   crossChecks: number;
 }
 
@@ -50,17 +47,14 @@ export const Dashboard: React.FC = () => {
     totalPO: 0,
     totalQtyReceived: 0,
     totalPOPending: 0,
-    totalLifting: 0,
-    totalLiftPending: 0,
     totalPOSum: 0,
     totalPOPendingCount: 0,
-    totalLiftingCount: 0,
-    totalLiftPendingCount: 0,
   });
   const [pendingCounts, setPendingCounts] = useState<PendingCounts>({
     approvals: 0,
     pos: 0,
-    lifting: 0,
+    trader: 0,
+    transporter: 0,
     crossChecks: 0,
   });
 
@@ -83,228 +77,31 @@ export const Dashboard: React.FC = () => {
 
     // Optimized PO Pending calculation
     const totalPOPending = indents.reduce((sum: number, i: any) => {
-      const receivedQty =
-        i.receivedQty ||
-        i["receivedQty"] ||
-        i["Received Qty"] ||
-        i["received_qty"] ||
-        i["#40"] ||
-        i["__col40"] ||
-        i["AN"] ||
-        0;
-      const receivedVal =
-        typeof receivedQty === "string"
-          ? Number(String(receivedQty).replace(/,/g, "").trim())
-          : Number(receivedQty);
-
-      const liftingQty =
-        i.liftingData?.qty ||
-        i.qty ||
-        i["qty"] ||
-        i["QTY"] ||
-        i["Qty"] ||
-        i["lifting_qty"] ||
-        i["Lifting Qty"] ||
-        i["#35"] ||
-        i["__col35"] ||
-        i["AI"] ||
-        0;
-      const liftingVal =
-        typeof liftingQty === "string"
-          ? Number(String(liftingQty).replace(/,/g, "").trim())
-          : Number(liftingQty);
-
-      const pending = receivedVal - liftingVal;
-      return sum + (Number.isFinite(pending) && pending > 0 ? pending : 0);
-    }, 0);
-
-    // Optimized PO Pending Count
-    const totalPOPendingCount = indents.reduce((count: number, i: any) => {
-      const poQty =
-        i.poQty ||
-        i["poQty"] ||
-        i["POQty"] ||
-        i["po_qty"] ||
-        i["PO Qty"] ||
-        i["po qty"] ||
-        i["#29"] ||
-        i["__col29"] ||
-        0;
-      const poVal =
-        typeof poQty === "string"
-          ? Number(String(poQty).replace(/,/g, "").trim())
-          : Number(poQty);
-
-      const receivedQty =
-        i.receivedQty ||
-        i["receivedQty"] ||
-        i["Received Qty"] ||
-        i["received_qty"] ||
-        i["#40"] ||
-        i["__col40"] ||
-        0;
-      const receivedVal =
-        typeof receivedQty === "string"
-          ? Number(String(receivedQty).replace(/,/g, "").trim())
-          : Number(receivedQty);
-
-      const pending = poVal - receivedVal;
-      return count + (Number.isFinite(pending) && pending > 0 ? 1 : 0);
-    }, 0);
-
-    // Optimized Lifting calculations
-    const totalLifting = indents.reduce((sum: number, i: any) => {
-      const liftingQty =
-        i.liftingData?.qty ||
-        i.qty ||
-        i["qty"] ||
-        i["QTY"] ||
-        i["Qty"] ||
-        i["lifting_qty"] ||
-        i["Lifting Qty"] ||
-        i["#35"] ||
-        i["__col35"] ||
-        i["AI"] ||
-        0;
-      const n =
-        typeof liftingQty === "string"
-          ? Number(String(liftingQty).replace(/,/g, "").trim())
-          : Number(liftingQty);
-      return sum + (Number.isFinite(n) ? n : 0);
-    }, 0);
-
-    const totalLiftPending = indents.reduce((sum: number, i: any) => {
-      const poQty =
-        i.poQty ||
-        i["poQty"] ||
-        i["POQty"] ||
-        i["po_qty"] ||
-        i["PO Qty"] ||
-        i["po qty"] ||
-        i["#29"] ||
-        i["__col29"] ||
-        0;
-      const poVal =
-        typeof poQty === "string"
-          ? Number(String(poQty).replace(/,/g, "").trim())
-          : Number(poQty);
-
-      const liftingQty =
-        i.liftingData?.qty ||
-        i.qty ||
-        i["qty"] ||
-        i["QTY"] ||
-        i["Qty"] ||
-        i["lifting_qty"] ||
-        i["Lifting Qty"] ||
-        i["#35"] ||
-        i["__col35"] ||
-        i["AI"] ||
-        0;
-      const liftingVal =
-        typeof liftingQty === "string"
-          ? Number(String(liftingQty).replace(/,/g, "").trim())
-          : Number(liftingQty);
-
-      const pending = poVal - liftingVal;
-      return sum + (Number.isFinite(pending) && pending > 0 ? pending : 0);
-    }, 0);
-
-    const totalLiftingCount = indents.reduce((count: number, i: any) => {
-      const liftingQty =
-        i.liftingData?.qty ||
-        i.qty ||
-        i["qty"] ||
-        i["QTY"] ||
-        i["Qty"] ||
-        i["lifting_qty"] ||
-        i["Lifting Qty"] ||
-        i["#35"] ||
-        i["__col35"] ||
-        i["AI"] ||
-        0;
-      const liftingVal =
-        typeof liftingQty === "string"
-          ? Number(String(liftingQty).replace(/,/g, "").trim())
-          : Number(liftingQty);
-      return count + (Number.isFinite(liftingVal) && liftingVal > 0 ? 1 : 0);
-    }, 0);
-
-    const totalLiftPendingCount = indents.reduce((count: number, i: any) => {
-      const poQty =
-        i.poQty ||
-        i["poQty"] ||
-        i["POQty"] ||
-        i["po_qty"] ||
-        i["PO Qty"] ||
-        i["po qty"] ||
-        i["#29"] ||
-        i["__col29"] ||
-        0;
-      const poVal =
-        typeof poQty === "string"
-          ? Number(String(poQty).replace(/,/g, "").trim())
-          : Number(poQty);
-
-      const liftingQty =
-        i.liftingData?.qty ||
-        i.qty ||
-        i["qty"] ||
-        i["QTY"] ||
-        i["Qty"] ||
-        i["lifting_qty"] ||
-        i["Lifting Qty"] ||
-        i["#35"] ||
-        i["__col35"] ||
-        i["AI"] ||
-        0;
-      const liftingVal =
-        typeof liftingQty === "string"
-          ? Number(String(liftingQty).replace(/,/g, "").trim())
-          : Number(liftingQty);
-
-      const pending = poVal - liftingVal;
-      return count + (Number.isFinite(pending) && pending > 0 ? 1 : 0);
-    }, 0);
-
-    const totalQty = indents.reduce((sum: number, i: any) => {
-      const qty = i.reorderQuantityPcs || i.poQty || i.qty || 0;
-      return sum + (typeof qty === "string" ? parseInt(qty) || 0 : qty);
-    }, 0);
-
-    const totalQtyReceived = indents.reduce((sum: number, i: any) => {
-      const r =
-        i.receivedQty ||
-        i["receivedQty"] ||
-        i["Received Qty"] ||
-        i["received_qty"] ||
-        i["#40"] ||
-        i["__col40"] ||
-        i["AN"] ||
-        0;
-      const n =
-        typeof r === "string"
-          ? Number(String(r).replace(/,/g, "").trim())
-          : Number(r);
-      return sum + (Number.isFinite(n) ? n : 0);
+      const poQty = Number(i.poQty || i.reorderQuantityPcs || 0);
+      const receivedQty = Number(i.receivedQty || 0);
+      const pending = poQty - receivedQty;
+      return sum + (pending > 0 ? pending : 0);
     }, 0);
 
     const totalPOSum = indents.reduce((sum: number, i: any) => {
-      const poQty =
-        i.poQty ||
-        i["poQty"] ||
-        i["POQty"] ||
-        i["po_qty"] ||
-        i["PO Qty"] ||
-        i["po qty"] ||
-        i["#29"] ||
-        i["__col29"] ||
-        0;
-      const n =
-        typeof poQty === "string"
-          ? Number(String(poQty).replace(/,/g, "").trim())
-          : Number(poQty);
-      return sum + (Number.isFinite(n) ? n : 0);
+      const qty = Number(i.poQty || (poFlag(i) ? i.reorderQuantityPcs : 0) || 0);
+      return sum + qty;
+    }, 0);
+
+    const totalQtyReceived = indents.reduce((sum: number, i: any) => {
+      const qty = Number(i.receivedQty || 0);
+      return sum + qty;
+    }, 0);
+
+    const totalPOPendingCount = indents.filter(i => {
+      const poQty = Number(i.poQty || i.reorderQuantityPcs || 0);
+      const receivedQty = Number(i.receivedQty || 0);
+      return poFlag(i) && poQty > receivedQty;
+    }).length;
+
+    const totalQty = indents.reduce((sum: number, i: any) => {
+      const qty = i.reorderQuantityPcs || 0;
+      return sum + Number(qty);
     }, 0);
 
     return {
@@ -317,19 +114,14 @@ export const Dashboard: React.FC = () => {
       totalPO,
       totalQtyReceived,
       totalPOPending,
-      totalLifting,
-      totalLiftPending,
       totalPOSum,
       totalPOPendingCount,
-      totalLiftingCount,
-      totalLiftPendingCount,
     };
   }, [indents]);
 
-  // Optimized pending counts calculation
   const pendingCountsData = useMemo(() => {
     if (!indents.length)
-      return { approvals: 0, pos: 0, lifting: 0, crossChecks: 0 };
+      return { approvals: 0, pos: 0, trader: 0, transporter: 0, crossChecks: 0 };
 
     const pendingApprovals = indents.filter((i: any) => {
       const hasPlanned =
@@ -342,32 +134,33 @@ export const Dashboard: React.FC = () => {
     const pendingPOs = indents.filter((i: any) => {
       const isApproved =
         i.approved === "Yes" || i.status === "approved" || i.approvalDate;
-      const hasTransporter =
-        i.transporterName?.trim() &&
-        String(i.transporterName).trim().length > 0;
-      return isApproved && !hasTransporter;
+      const hasPO = Boolean(i.poNumber || i.poGeneratedAt || i.poCopyLink);
+      return isApproved && !hasPO;
     }).length;
 
-    const pendingLifting = indents.filter((i: any) => {
-      const hasPlanned =
-        i.plannedAE?.trim() && String(i.plannedAE).trim().length > 0;
-      const hasLifting =
-        i.actualAF?.trim() && String(i.actualAF).trim().length > 0;
-      return hasPlanned && !hasLifting;
+    const pendingTrader = indents.filter((i: any) => {
+      const hasPO = Boolean(i.poNumber || i.poGeneratedAt || i.poCopyLink);
+      const isVerified = String(i.traderStatus || "").trim().toLowerCase() === "yes";
+      return hasPO && !isVerified;
+    }).length;
+
+    const pendingTransporter = indents.filter((i: any) => {
+      const isTraderVerified = String(i.traderStatus || "").trim().toLowerCase() === "yes";
+      const isPickedUp = String(i.transporterStatus || "").trim().toLowerCase() === "pickup";
+      return isTraderVerified && !isPickedUp;
     }).length;
 
     const pendingCrossChecks = indents.filter((i: any) => {
-      const hasPlanned =
-        i.plannedAK?.trim() && String(i.plannedAK).trim().length > 0;
-      const hasCrossCheck =
-        i.actualAL?.trim() && String(i.actualAL).trim().length > 0;
-      return hasPlanned && !hasCrossCheck;
+      const isPickedUp = String(i.transporterStatus || "").trim().toLowerCase() === "pickup";
+      const hasCrossCheck = Boolean(i.actualAL || i.receivedQty || i.actual7);
+      return isPickedUp && !hasCrossCheck;
     }).length;
 
     return {
       approvals: pendingApprovals,
       pos: pendingPOs,
-      lifting: pendingLifting,
+      trader: pendingTrader,
+      transporter: pendingTransporter,
       crossChecks: pendingCrossChecks,
     };
   }, [indents]);
@@ -542,13 +335,6 @@ export const Dashboard: React.FC = () => {
             bgColor="bg-blue-50"
           />
           <StatCard
-            title="LIFTING QTY"
-            value={stats.totalLifting.toLocaleString()}
-            icon={Send}
-            color="text-purple-600"
-            bgColor="bg-purple-50"
-          />
-          <StatCard
             title="RECEIVING QTY"
             value={stats.totalQtyReceived.toLocaleString()}
             icon={Package}
@@ -580,9 +366,14 @@ export const Dashboard: React.FC = () => {
                   color: "bg-blue-500",
                 },
                 {
-                  label: "Lifting Pending",
-                  value: pendingCounts.lifting,
-                  color: "bg-purple-500",
+                  label: "Trader Verification Pending",
+                  value: pendingCounts.trader,
+                  color: "bg-indigo-500",
+                },
+                {
+                  label: "Transporter Verification Pending",
+                  value: pendingCounts.transporter,
+                  color: "bg-emerald-500",
                 },
                 {
                   label: "Cross-Check Pending",

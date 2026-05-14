@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, ChangeEvent, FormEvent } from 'react';
+import { SCRIPT_URLS } from '../../utils/envConfig';
 
-// ─── GAS Web App URL (your deployed script) ──────────────────────────────────
-const GAS_URL = import.meta.env.VITE_WHATSAPP_API_URL;
+// ─── GAS Web App URL — uses envConfig for dev/prod URL resolution ─────────────
+const GAS_URL = SCRIPT_URLS.WHATSAPP_SEND;
 
 // ─── User Sheet ID (for history read) ────────────────────────────────────────
 const USER_SHEET_ID = '1UEzymu5KMzTy6Ox7bZ4JwPiPCP_vSqZrCl4f-m7Nu_M';
@@ -42,7 +43,7 @@ interface HistoryRow {
 }
 
 // ─── Unified GAS Request Helper (Fetch via Proxy) ────────────────────────────
-async function requestGAS(params: Record<string, any>, method: 'GET' | 'POST' = 'GET'): Promise<any> {
+async function requestGAS(params: Record<string, any>, method: 'GET' | 'POST' = 'POST'): Promise<any> {
     if (!GAS_URL) {
         throw new Error('VITE_WHATSAPP_API_URL is not configured in .env file.');
     }
@@ -71,17 +72,21 @@ async function requestGAS(params: Record<string, any>, method: 'GET' | 'POST' = 
 
         let text = await response.text();
 
-        // Strip JSONP wrapper if present (e.g. callback([...]))
-        // This handles cases where GAS returns a callback string instead of pure JSON
+        // Strip JSONP wrapper if present
         const trimmed = text.trim();
         if (trimmed.match(/^[a-zA-Z0-9_]+\(/) && (trimmed.endsWith(')') || trimmed.endsWith(');'))) {
             text = trimmed.replace(/^[a-zA-Z0-9_]+\(/, '').replace(/\);?$/, '');
         }
 
-        // Diagnose HTML responses (wrong ID / access restricted)
-        if (text.trimStart().startsWith("<!DOCTYPE") || text.trimStart().startsWith("<html")) {
-            console.error("[WhatsappSendMessage] ❌ GAS returned HTML — deployment or proxy issue.");
-            throw new Error("Invalid response from server (HTML). Check GAS deployment.");
+        // Detect any non-JSON response (HTML, Google error pages, redirects)
+        const firstChar = text.trimStart()[0];
+        if (firstChar !== '{' && firstChar !== '[' && firstChar !== '"') {
+            console.error("[WhatsappSendMessage] ❌ GAS returned non-JSON:", text.substring(0, 120));
+            throw new Error(
+                text.trimStart().startsWith('<') 
+                    ? 'GAS returned HTML — check deployment access is set to \'Anyone\'.'
+                    : 'GAS script error — please update and redeploy the Master Login script.'
+            );
         }
 
         return JSON.parse(text);
@@ -224,7 +229,7 @@ const WhatsappSendMessage: React.FC = () => {
         setIsLoadingShops(true);
         setStatus({ message: '', type: '' });
         try {
-            const data = await requestGAS({ action: 'getShopNames' });
+            const data = await requestGAS({ action: 'getShopNames' }, 'POST');
             setShopNames(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load shops: ${err.message}`, type: 'error' });
@@ -237,7 +242,16 @@ const WhatsappSendMessage: React.FC = () => {
         setIsHistoryLoading(true);
         setHistoryError('');
         try {
-            const rows = await fetchHistoryFromGAS();
+            const data = await requestGAS({ action: 'getHistory', sheetId: USER_SHEET_ID }, 'POST');
+            const rows = Array.isArray(data) ? data.map((row: any[]) => ({
+                timestamp: row[0] ?? '',
+                shopName: row[1] ?? '',
+                message: row[2] ?? '',
+                names: row[3] ?? '',
+                numbers: row[4] ?? '',
+                status: row[5] ?? '',
+                fileLink: row[6] ?? '',
+            })) : [];
             setHistoryRows(rows);
         } catch (err: any) {
             setHistoryError(`⚠️ Could not load history: ${err.message}`);
@@ -262,7 +276,7 @@ const WhatsappSendMessage: React.FC = () => {
 
         setIsLoadingContacts(true);
         try {
-            const data = await requestGAS({ action: 'getContactsByShop', shopName: shop });
+            const data = await requestGAS({ action: 'getContactsByShop', shopName: shop }, 'POST');
             setContacts(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load contacts: ${err.message}`, type: 'error' });

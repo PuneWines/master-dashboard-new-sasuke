@@ -250,6 +250,7 @@ export interface POContactEntry {
   transporterPhone: string;
   receiverManager: string;
   receiverPhone: string;
+  poQty?: number;
 }
 
 export interface TransporterVerificationEntry {
@@ -294,6 +295,16 @@ interface IndentService {
   ): Promise<void>;
   addToWhatsappSheet(phone: string, message: string, mediaUrl?: string): Promise<void>;
   getMasterReceivers(): Promise<string[]>;
+  postMasterData(sheetId: string, sheetName: string, data: Record<string, any>): Promise<void>;
+  fetchMasterSheetData(sheetId: string, sheetName: string): Promise<any[]>;
+  updateMasterSheetData(sheetId: string, sheetName: string, matchCriteria: Record<string, string>, updates: Record<string, any>): Promise<void>;
+  updateIndentsBulkReceived(
+    items: {
+      id: string;
+      updates: Partial<IndentItem>;
+      rowIndexOverride?: number;
+    }[]
+  ): Promise<void>;
 }
 
 // Function to fetch data from column A of the FMS sheet
@@ -1522,10 +1533,11 @@ export const indentService: IndentService = {
           new Date().toISOString().slice(0, 19).replace("T", " "), // Col A - Timestamp
           id,                                                        // Col B - Indent Number
           updates.shopName || "",                                    // Col C - Shop Name
-          updates.receiverName || "",                                // Col D - Receiver Name (NEW)
+          updates.itemName || "",                                    // Col D - Item Name
           updates.receivedQty || "",                                 // Col E - Received Qty
-          updates.difference || "",                                  // Col F - Diff
-          updates.receiveRemarks || "",                              // Col G - Remark2
+          updates.receiveRemarks || "",                              // Col F - Remark2
+          updates.difference || "",                                  // Col G - Diff
+          updates.receiverName || "",                                // Col H - Receiver Name
         ];
         console.log("Received rowData being sent:", receivedRowData);
         receivedUrl.searchParams.set(
@@ -2058,6 +2070,86 @@ export const indentService: IndentService = {
     }
   },
 
+  async updateIndentsBulkReceived(
+    items: {
+      id: string;
+      updates: Partial<IndentItem>;
+      rowIndexOverride?: number;
+    }[]
+  ): Promise<void> {
+    if (!SCRIPT_URL) return;
+
+    try {
+      const allOps: Promise<any>[] = [];
+
+      for (const item of items) {
+        const { id, updates, rowIndexOverride } = item;
+        const rowIndex = rowIndexOverride || -1;
+
+        // 1. Update Actual 7 (BD column) and other status fields in All Indent
+        if (rowIndex > 0) {
+          // Find BD column index (index 55 or fallback 55)
+          const colActual7 = 55; // Column BD is index 55 (0-based)
+          
+          const markUrl = buildUrl("markdeleted");
+          const params = new URLSearchParams();
+          params.set("action", "markdeleted");
+          params.set("sheet", SHEET_NAME);
+          if (SHEET_ID) params.set("sheetId", SHEET_ID);
+          params.set("rowIndex", String(rowIndex));
+          params.set("columnIndex", String(colActual7 + 1));
+          params.set("value", String(updates.actual7));
+          
+          allOps.push(
+            fetch(markUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8" },
+              body: params.toString(),
+            })
+          );
+        }
+
+        // 2. Insert into Received sheet
+        const receivedUrl = new URL(
+          SCRIPT_URL,
+          typeof window !== "undefined" ? window.location.origin : undefined
+        );
+        receivedUrl.searchParams.set("action", "insert");
+        receivedUrl.searchParams.set("sheet", "Received");
+        if (SHEET_ID) receivedUrl.searchParams.set("sheetId", SHEET_ID);
+        
+        const receivedRowData = [
+          new Date().toISOString().slice(0, 19).replace("T", " "), // Col A - Timestamp
+          id,                                                        // Col B - Indent Number
+          updates.shopName || "",                                    // Col C - Shop Name
+          updates.itemName || "",                                    // Col D - Item Name
+          updates.receivedQty || "",                                 // Col E - Received Qty
+          updates.receiveRemarks || "",                              // Col F - Remark2
+          updates.difference || "",                                  // Col G - Diff
+          updates.receiverName || "",                                // Col H - Receiver Name
+        ];
+        
+        receivedUrl.searchParams.set("rowData", JSON.stringify(receivedRowData));
+        
+        allOps.push(
+          fetch(receivedUrl.toString(), {
+            method: "POST",
+            headers: { Accept: "application/json" },
+            mode: "cors",
+          })
+        );
+      }
+
+      if (allOps.length > 0) {
+        await Promise.all(allOps);
+        console.log(`✅ Bulk Received update completed for ${items.length} items`);
+      }
+      clearIndentCache();
+    } catch (e) {
+      console.error("Bulk Received update failed:", e);
+      throw e;
+    }
+  },
   async getMasterCompanies(): Promise<string[]> {
     if (!SCRIPT_URL) {
       return ["THE LIQUOR STORY", "ABC Distributors", "XYZ Suppliers"];
@@ -2609,6 +2701,7 @@ export const indentService: IndentService = {
             indentNumber: String(row[1] || "").trim(), // B
             shopName: String(row[2] || "").trim(),     // C
             transporterName: String(row[3] || "").trim(), // D
+            poQty: Number(row[5] || 0),                   // F
             traderName: String(row[8] || "").trim(),      // I
             receiverManager: String(row[9] || "").trim(), // J
             traderPhone: String(row[11] || "").trim(),    // L
@@ -2620,6 +2713,7 @@ export const indentService: IndentService = {
           indentNumber: String(row["Indent Number"] || row.indentNumber || "").trim(),
           shopName: String(row["Shop Name"] || row.shopName || "").trim(),
           transporterName: String(row["Transport Name"] || row.transporterName || "").trim(),
+          poQty: Number(row["PO Qty"] || row.poQty || 0),
           traderName: String(row["Trader Name"] || row.traderName || "").trim(),
           receiverManager: String(row["Receiver Manager"] || row.receiverManager || "").trim(),
           traderPhone: String(row["Trader Phone"] || row.traderPhone || "").trim(),
@@ -2739,6 +2833,95 @@ export const indentService: IndentService = {
       if (!result.success) throw new Error(result.message || "Failed to add to Whatsapp sheet");
     } catch (error) {
       console.error("Error adding to Whatsapp sheet:", error);
+      throw error;
+    }
+  },
+
+  async postMasterData(
+    sheetId: string,
+    sheetName: string,
+    data: Record<string, any>
+  ): Promise<void> {
+    const MASTER_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzUgx9S_84iGbZ9CsHvVCNdqIWhVqYuozYSeJ78f0ecEeGclra7S0mSbfiYQiiCouwjzg/exec";
+    try {
+      const url = new URL(MASTER_SCRIPT_URL);
+
+      const body = {
+        action: "append",
+        sheetId: sheetId,
+        sheet: sheetName,
+        data: data
+      };
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+      if (!result.success && result.status !== "success") {
+        throw new Error(result.message || `Failed to add data to ${sheetName}`);
+      }
+    } catch (error) {
+      console.error(`Error posting to master data sheet ${sheetName}:`, error);
+      throw error;
+    }
+  },
+
+  async fetchMasterSheetData(sheetId: string, sheetName: string): Promise<any[]> {
+    if (!SCRIPT_URL) return [];
+    try {
+      const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+      url.searchParams.set("action", "fetch");
+      url.searchParams.set("sheetId", sheetId);
+      url.searchParams.set("sheet", sheetName);
+
+      const response = await fetch(url.toString(), {
+        method: "GET",
+        headers: { Accept: "application/json" },
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      const rows = Array.isArray(data) ? data : (data.data || data.values || []);
+      return rows;
+    } catch (error) {
+      console.error(`Error fetching ${sheetName}:`, error);
+      return [];
+    }
+  },
+
+  async updateMasterSheetData(
+    sheetId: string,
+    sheetName: string,
+    matchCriteria: Record<string, string>,
+    updates: Record<string, any>
+  ): Promise<void> {
+    const MASTER_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzUgx9S_84iGbZ9CsHvVCNdqIWhVqYuozYSeJ78f0ecEeGclra7S0mSbfiYQiiCouwjzg/exec";
+    try {
+      const url = new URL(MASTER_SCRIPT_URL);
+
+      const body = {
+        action: "update",
+        sheetId: sheetId,
+        sheet: sheetName,
+        matchCriteria,
+        updates
+      };
+
+      const response = await fetch(url.toString(), {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(body),
+      });
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const result = await response.json();
+      if (!result.success) throw new Error(result.message || "Update failed");
+    } catch (error) {
+      console.error(`Error updating ${sheetName}:`, error);
       throw error;
     }
   },

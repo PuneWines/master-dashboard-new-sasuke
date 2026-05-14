@@ -64,6 +64,9 @@ interface IndentItem {
   status?: string;
   vendorName?: string;
   sizes?: string[];
+  poQty?: number;
+  receiverManager?: string;
+  _rowIndex?: number;
 
   // From Lifting
   liftingData?: {
@@ -112,6 +115,11 @@ interface ColumnVisibility {
   pendingReceivingQty: boolean;
   liftingDate: boolean;
   liftingQty: boolean;
+  orderQty: boolean;
+  poQty: boolean;
+  receivingQty: boolean;
+  diff: boolean;
+  receiverName: boolean;
 }
 
 // ---------------------------------------------------------------------
@@ -121,147 +129,125 @@ const TableRow = React.memo(
   ({
     indent,
     activeTab,
-    onCrossCheck,
-    onViewImage,
+    isSelected,
+    onSelect,
+    editData,
+    onEdit,
+    diff,
     columnVisibility,
   }: {
     indent: IndentItem;
     activeTab: "pending" | "history";
-    onCrossCheck: (indent: IndentItem) => void;
-    onViewImage: (url: string) => void;
+    isSelected: boolean;
+    onSelect: (id: string) => void;
+    editData: { receivedQty: string; receiveRemarks: string };
+    onEdit: (id: string, field: "receivedQty" | "receiveRemarks", value: string) => void;
+    diff: number;
     columnVisibility: ColumnVisibility;
   }) => {
+    const isPending = activeTab === "pending";
+
     return (
-      <tr className="hover:bg-gray-50">
-        {/* Action */}
+      <tr className={`hover:bg-gray-50 ${isSelected ? "bg-purple-50" : ""}`}>
+        {/* Action / Checkbox */}
         {columnVisibility.action && (
           <td className="px-6 py-4 whitespace-nowrap">
-            {activeTab === "pending" && isTrulyEmpty(indent.actual7) ? (
-              <button
-                onClick={() => onCrossCheck(indent)}
-                className="flex gap-1 items-center px-3 py-1 text-sm text-white bg-purple-600 rounded-lg transition hover:bg-purple-700"
-              >
-                <Package className="w-4 h-4" />
-                <span>Receive</span>
-              </button>
+            {isPending ? (
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => onSelect(indent.id)}
+                className="w-4 h-4 text-purple-600 rounded border-gray-300 focus:ring-purple-500"
+              />
             ) : (
-              <span className="text-sm text-gray-500">Received</span>
+              <CheckCircle className="w-5 h-5 text-green-500" />
             )}
           </td>
         )}
 
-        {/* Indent Number */}
-        {columnVisibility.indentNumber && (
-          <td className="px-6 py-4 text-sm font-medium text-gray-900 whitespace-nowrap">
-            {indent.indentNumber}
-          </td>
-        )}
-
-        {/* Shop */}
-        {columnVisibility.shopName && (
+        {/* Order qty */}
+        {columnVisibility.orderQty && (
           <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-            {indent.shopName}
+            {indent.reorderQuantityPcs || 0}
           </td>
         )}
 
-        {/* Trader Name */}
-        {columnVisibility.traderName && (
-          <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-            {indent.traderName}
-          </td>
-        )}
-        
-        {/* Pending Receiving Qty - From column AS */}
-        {columnVisibility.pendingReceivingQty && activeTab === "history" && (
-          <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-            {indent.pendingReceivingQty ? Math.round(Number(indent.pendingReceivingQty)) : "-"}
+        {/* Po Qty */}
+        {columnVisibility.poQty && (
+          <td className="px-6 py-4 text-sm font-semibold text-gray-900 whitespace-nowrap">
+            {indent.poQty || 0}
           </td>
         )}
 
-        {/* Lifting Date - From column AF */}
-        {columnVisibility.liftingDate && (
-          <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-            {formatDateOnly(indent.liftingDate || indent.actualAF)}
-          </td>
-        )}
-
-        {/* Lifting Qty */}
-        {columnVisibility.liftingQty && (
-          <td className="px-6 py-4 text-sm font-semibold text-blue-600 whitespace-nowrap">
-            {indent.liftingData?.qty || "-"}
-          </td>
-        )}
-
-        {/* Item */}
+        {/* Item Name */}
         {columnVisibility.itemName && (
-          <td className="px-6 py-4 text-sm text-gray-500">
-            <div>
-              <div className="font-medium">{indent.itemName}</div>
-              <div className="text-xs text-gray-400">
-                {indent.sizes?.join(", ") || "-"}
-              </div>
-            </div>
+          <td className="px-6 py-4 text-sm text-gray-900">
+            <div className="font-medium">{indent.itemName}</div>
+            <div className="text-xs text-gray-400">{indent.indentNumber}</div>
           </td>
         )}
 
-        {/* Transporter */}
+        {/* Transporter Name */}
         {columnVisibility.transporterName && (
           <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
             {indent.transporterName || "-"}
           </td>
         )}
 
-        {/* Transport Copy */}
-        {columnVisibility.transportCopy && (
-          <td className="px-6 py-4 text-sm whitespace-nowrap">
-            {indent.liftingData?.transportCopy ? (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onViewImage(indent.liftingData!.transportCopy!);
-                }}
-                className="flex gap-2 items-center font-medium text-blue-600 hover:text-blue-800"
-              >
-                <ImageIcon className="w-4 h-4" />
-                View
-              </button>
-            ) : (
-              <span className="text-gray-400">-</span>
-            )}
-          </td>
-        )}
-
-        {/* Bill Copy */}
-        {columnVisibility.billCopy && (
-          <td className="px-6 py-4 text-sm whitespace-nowrap">
-            {indent.liftingData?.billCopy ? (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onViewImage(indent.liftingData!.billCopy!);
-                }}
-                className="flex gap-2 items-center font-medium text-blue-600 hover:text-blue-800"
-              >
-                <ImageIcon className="w-4 h-4" />
-                View
-              </button>
-            ) : (
-              <span className="text-gray-400">-</span>
-            )}
-          </td>
-        )}
-
-        {/* Difference */}
-        {activeTab === "history" && columnVisibility.difference && (
+        {/* Trader name */}
+        {columnVisibility.traderName && (
           <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-            {indent.difference || "-"}
+            {indent.traderName || "-"}
+          </td>
+        )}
+
+        {/* Receiving Qty */}
+        {columnVisibility.receivingQty && (
+          <td className="px-6 py-4 whitespace-nowrap">
+            {isPending ? (
+              <input
+                type="number"
+                value={editData?.receivedQty || ""}
+                onChange={(e) => onEdit(indent.id, "receivedQty", e.target.value)}
+                className="w-24 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
+                placeholder="Qty"
+              />
+            ) : (
+              <span className="text-sm text-gray-900 font-medium">{indent.receivedQty}</span>
+            )}
+          </td>
+        )}
+
+        {/* Diff */}
+        {columnVisibility.diff && (
+          <td className="px-6 py-4 whitespace-nowrap">
+            <span className={`text-sm font-bold ${diff === 0 ? "text-green-600" : "text-red-600"}`}>
+              {isPending ? diff : indent.difference}
+            </span>
+          </td>
+        )}
+
+        {/* Receiver Name */}
+        {columnVisibility.receiverName && (
+          <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
+            {indent.receiverManager || "-"}
           </td>
         )}
 
         {/* Remarks */}
-        {activeTab === "history" && columnVisibility.remarks && (
-          <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
-            {indent.receiveRemarks || "-"}
+        {columnVisibility.remarks && (
+          <td className="px-6 py-4 whitespace-nowrap">
+            {isPending ? (
+              <input
+                type="text"
+                value={editData?.receiveRemarks || ""}
+                onChange={(e) => onEdit(indent.id, "receiveRemarks", e.target.value)}
+                className="w-48 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
+                placeholder="Remarks..."
+              />
+            ) : (
+              <span className="text-sm text-gray-500 italic">{indent.receiveRemarks || "-"}</span>
+            )}
           </td>
         )}
       </tr>
@@ -317,21 +303,43 @@ export const CrossCheckPage: React.FC = () => {
 
   // Column filter states
   const [showColumnFilter, setShowColumnFilter] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [rowEdits, setRowEdits] = useState<Record<string, { receivedQty: string; receiveRemarks: string }>>({});
+  const [poContacts, setPoContacts] = useState<any[]>([]);
+
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>({
     action: true,
-    indentNumber: true,
-    shopName: true,
+    orderQty: true,
+    poQty: true,
     itemName: true,
     transporterName: true,
+    traderName: true,
+    receivingQty: true,
+    diff: true,
+    receiverName: true,
+    remarks: true,
+    indentNumber: true,
+    shopName: true,
     transportCopy: true,
     billCopy: true,
     difference: true,
-    remarks: true,
-    traderName: true,
     pendingReceivingQty: true,
     liftingDate: true,
     liftingQty: true,
   });
+
+  const columnLabels = {
+    action: "Action",
+    orderQty: "Order qty",
+    poQty: "Po Qty",
+    itemName: "Item Name",
+    transporterName: "Transporter Name",
+    traderName: "Trader name",
+    receivingQty: "Receiving Qty",
+    diff: "Diff",
+    receiverName: "Receiver Name",
+    remarks: "Remarks",
+  };
 
   // Helper function to process and validate image URLs
   const getImageUrl = (url?: string): string => {
@@ -382,15 +390,37 @@ export const CrossCheckPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const googleSheetData = await indentService.getIndents();
+      const [googleSheetData, poSheetData] = await Promise.all([
+        indentService.getIndents(),
+        indentService.getPOContactData()
+      ]);
+
+      setPoContacts(poSheetData);
+
       const saved = localStorage.getItem("indent_approval_data");
       const localData: IndentItem[] = saved ? JSON.parse(saved) : [];
 
       const mergedData = googleSheetData.map((googleItem) => {
         const localItem = localData.find((local) => local.id === googleItem.id);
+
+        // Find PO contact info for this indent with robust matching
+        const poInfo = poSheetData.find(po => 
+          String(po.indentNumber || "").trim().toLowerCase() === String(googleItem.indentNumber || "").trim().toLowerCase()
+        );
+
+        const base = {
+          ...googleItem,
+          // Explicitly pull PO quantity from Column F (index 5) of PO sheet as per requirement
+          poQty: poInfo ? Number(poInfo.poQty || 0) : (Number(googleItem.poQty) || 0),
+          // Preference given to PO sheet data for Receiver Manager Name (J2:J)
+          receiverManager: poInfo?.receiverManager || googleItem.receiverManager || "",
+          traderName: poInfo?.traderName || googleItem.traderName || "",
+          transporterName: poInfo?.transporterName || googleItem.transporterName || "",
+        };
+
         if (localItem) {
           return {
-            ...googleItem,
+            ...base,
             ...localItem,
             liftingData: localItem.liftingData || googleItem.liftingData,
             liftingDate: localItem.liftingDate || (googleItem as IndentItem).liftingDate || googleItem.actualAF,
@@ -407,7 +437,7 @@ export const CrossCheckPage: React.FC = () => {
           };
         }
         return {
-          ...googleItem,
+          ...base,
           liftingDate: (googleItem as IndentItem).liftingDate || googleItem.actualAF,
           planned7: (googleItem as IndentItem).planned7,
           actual7: (googleItem as IndentItem).actual7,
@@ -418,23 +448,30 @@ export const CrossCheckPage: React.FC = () => {
       const allowedShops =
         userShopRaw && userShopRaw.toLowerCase() !== "all"
           ? userShopRaw
-              .split(",")
-              .map((s) => s.trim().toLowerCase())
-              .filter(Boolean)
+            .split(",")
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean)
           : null;
       const filtered = allowedShops
         ? mergedData.filter((i) =>
-            allowedShops.includes((i.shopName || "").trim().toLowerCase())
-          )
+          allowedShops.includes((i.shopName || "").trim().toLowerCase())
+        )
         : mergedData;
       setIndents(filtered);
+
+      // Initialize row edits: receivingQty defaults to lifting qty, remarks MUST BE EMPTY
+      const initialEdits: Record<string, { receivedQty: string; receiveRemarks: string }> = {};
+      filtered.forEach(i => {
+        initialEdits[i.id] = {
+          receivedQty: i.receivedQty || i.liftingData?.qty || "",
+          receiveRemarks: "" // Always empty for new edits as per user request
+        };
+      });
+      setRowEdits(initialEdits);
+
     } catch (err: any) {
       console.error("Error fetching indents:", err);
-      setError("Failed to load indents. Using local data as fallback.");
-
-      const saved = localStorage.getItem("indent_approval_data");
-      const localIndents: IndentItem[] = saved ? JSON.parse(saved) : [];
-      setIndents(localIndents);
+      setError("Failed to load indents.");
     } finally {
       setLoading(false);
     }
@@ -442,15 +479,6 @@ export const CrossCheckPage: React.FC = () => {
 
   useEffect(() => {
     fetchIndents();
-    const fetchReceivers = async () => {
-      try {
-        const names = await indentService.getMasterReceivers();
-        setReceiverNames(names);
-      } catch (err) {
-        console.error("Error fetching receivers:", err);
-      }
-    };
-    fetchReceivers();
   }, [fetchIndents]);
 
   // Check for success message after reload
@@ -467,10 +495,10 @@ export const CrossCheckPage: React.FC = () => {
   const currentIndents = useMemo(() => {
     // 1. Get base list for the active tab
     // Pending: BC (planned7) is NOT NULL AND BD (actual7) is NULL
-    const baseList = activeTab === "pending" 
+    const baseList = activeTab === "pending"
       ? indents.filter((i) => !isTrulyEmpty(i.planned7) && isTrulyEmpty(i.actual7))
       : indents.filter((i) => !isTrulyEmpty(i.actual7));
-      
+
     if (activeTab === "pending" && baseList.length > 0) {
       console.log("Pending Indents Sample (BC/BD Logic):", { id: baseList[0].id, planned7: baseList[0].planned7, actual7: baseList[0].actual7 });
     }
@@ -499,8 +527,8 @@ export const CrossCheckPage: React.FC = () => {
         const indentDate = indent.actualAL
           ? new Date(indent.actualAL)
           : indent.liftingData?.liftingCompletedAt
-          ? new Date(indent.liftingData.liftingCompletedAt)
-          : null;
+            ? new Date(indent.liftingData.liftingCompletedAt)
+            : null;
 
         if (indentDate) {
           if (startDate && new Date(startDate) > indentDate) {
@@ -534,12 +562,12 @@ export const CrossCheckPage: React.FC = () => {
   }, [indents, activeTab, searchTerm, filterField, filterValue, filterSearch, startDate, endDate]);
 
   // For tab counts only (simplified)
-  const pendingCount = useMemo(() => 
-    indents.filter((i) => !isTrulyEmpty(i.planned7) && isTrulyEmpty(i.actual7)).length, 
-  [indents]);
-  const historyCount = useMemo(() => 
-    indents.filter((i) => !isTrulyEmpty(i.actual7)).length, 
-  [indents]);
+  const pendingCount = useMemo(() =>
+    indents.filter((i) => !isTrulyEmpty(i.planned7) && isTrulyEmpty(i.actual7)).length,
+    [indents]);
+  const historyCount = useMemo(() =>
+    indents.filter((i) => !isTrulyEmpty(i.actual7)).length,
+    [indents]);
 
   // Persist filters to localStorage whenever they change
   useEffect(() => {
@@ -583,19 +611,89 @@ export const CrossCheckPage: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleOutside);
   }, []);
 
-  const columnLabels = {
-    action: "Action",
-    indentNumber: "Indent No.",
-    shopName: "Shop",
-    itemName: "Item",
-    transporterName: "Transporter",
-    transportCopy: "Transport Copy",
-    billCopy: "Bill Copy",
-    difference: "Difference",
-    remarks: "Remarks",
-    traderName: "Trader Name",
-    liftingDate: "Lifting Date",
-    liftingQty: "Lifting Qty",
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === currentIndents.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(currentIndents.map((i) => i.id)));
+    }
+  };
+
+  const handleRowEdit = (id: string, field: "receivedQty" | "receiveRemarks", value: string) => {
+    setRowEdits(prev => ({
+      ...prev,
+      [id]: {
+        ...prev[id],
+        [field]: value
+      }
+    }));
+  };
+
+  const calculateDiff = (id: string) => {
+    const indent = indents.find(i => i.id === id);
+    const edit = rowEdits[id];
+    if (!indent || !edit) return 0;
+    
+    const poQty = Number(indent.poQty || 0);
+    const received = Number(edit.receivedQty || 0);
+    
+    // User requirement: PO Qty - Receiving Qty
+    return poQty - received;
+  };
+
+  const handleBulkSubmit = async () => {
+    if (selectedIds.size === 0) return;
+
+    setIsSubmitting(true);
+    setErrorMessage("");
+
+    const itemsToSubmit = Array.from(selectedIds).map(id => {
+      const indent = indents.find(i => i.id === id);
+      const edit = rowEdits[id];
+      const now = formatTimestamp(new Date());
+      const diff = calculateDiff(id);
+
+      return {
+        id: indent!.id,
+        updates: {
+          actual7: now,
+          receivedQty: edit.receivedQty,
+          receiveRemarks: edit.receiveRemarks,
+          difference: String(diff),
+          receiveStatus: (diff === 0 ? "All Okay" : "Not Okay") as "All Okay" | "Not Okay",
+          shopName: indent!.shopName,
+          itemName: indent!.itemName,
+          receiverName: indent!.receiverManager || "System",
+          isReceived: true
+        },
+        rowIndexOverride: indent!._rowIndex
+      };
+    });
+
+    try {
+      await indentService.updateIndentsBulkReceived(itemsToSubmit);
+
+      setSuccessMessage(`${selectedIds.size} indents received successfully.`);
+      setSelectedIds(new Set());
+
+      setTimeout(() => {
+        window.location.reload();
+      }, 1500);
+    } catch (e) {
+      console.error("Bulk submit failed:", e);
+      setErrorMessage("Failed to submit. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const toggleColumn = (column: keyof ColumnVisibility) => {
@@ -610,8 +708,8 @@ export const CrossCheckPage: React.FC = () => {
   // -----------------------------------------------------------------
   const calculateDifference = (receivedQty: string, indent: IndentItem | null = selectedIndent) => {
     if (!indent) return "";
-    const isSpecialShop = 
-      indent.shopName === "Kunal Ulwe Wines" || 
+    const isSpecialShop =
+      indent.shopName === "Kunal Ulwe Wines" ||
       indent.shopName === "Balaji Wines" ||
       indent.shopName === "Balaji";
 
@@ -698,11 +796,11 @@ export const CrossCheckPage: React.FC = () => {
 
       // Set success message and reload
       localStorage.setItem("cross_check_success_msg", `Cross check completed successfully for indent ${selectedIndent.indentNumber}.`);
-      
+
       setShowModal(false);
       setSelectedIndent(null);
       setReceiveData({ receivedQty: "", difference: "", receiveRemarks: "", receiverName: "" });
-      
+
       window.location.reload();
     } catch (error: any) {
       console.error("Submit error:", error);
@@ -728,720 +826,143 @@ export const CrossCheckPage: React.FC = () => {
   return (
     <div className="p-4 min-h-screen bg-gray-50 md:p-6 w-full lg:w-[calc(100vw-280px)]">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 md:text-3xl">
-          Cross Check & Receive
-          {filterField === "traderName" && filterValue
-            ? ` - Trader: ${filterValue}`
-            : ""}
-        </h1>
-        <p className="mt-1 text-sm text-gray-600 md:text-base">
-          Verify lifted items where Planned 5 (AK) is set. History shows
-          completed cross-checks.
-        </p>
+      <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 md:text-3xl">
+            Cross Check & Receive
+          </h1>
+          <p className="mt-1 text-sm text-gray-600 md:text-base">
+            Manage incoming stock and verify quantities against PO.
+          </p>
+        </div>
+
+        {activeTab === "pending" && selectedIds.size > 0 && (
+          <button
+            onClick={handleBulkSubmit}
+            disabled={isSubmitting}
+            className={`px-8 py-3 rounded-xl font-bold text-white transition-all shadow-lg hover:scale-105 active:scale-95 ${isSubmitting ? "bg-gray-400 cursor-not-allowed" : "bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700"
+              }`}
+          >
+            {isSubmitting ? (
+              <span className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Submitting...
+              </span>
+            ) : `Submit Selected (${selectedIds.size})`}
+          </button>
+        )}
       </div>
 
-      {/* Error */}
+      {/* Error/Success Messages */}
       {error && (
-        <div className="p-4 mb-6 text-sm text-red-800 bg-red-50 rounded-lg border border-red-200">
-          {error}
+        <div className="p-4 mb-6 bg-red-50 text-red-800 rounded-xl border border-red-200 flex justify-between items-center">
+          <span>{error}</span>
+          <button onClick={fetchIndents} className="text-sm font-bold underline">Retry</button>
+        </div>
+      )}
+      {successMessage && (
+        <div className="p-4 mb-6 bg-green-50 text-green-800 rounded-xl border border-green-200 flex items-center gap-3 animate-bounce">
+          <CheckCircle className="w-5 h-5" />
+          <span className="font-medium">{successMessage}</span>
+        </div>
+      )}
+      {errorMessage && (
+        <div className="p-4 mb-6 bg-red-50 text-red-800 rounded-xl border border-red-200 flex items-center gap-3">
+          <X className="w-5 h-5" />
+          <span className="font-medium">{errorMessage}</span>
+        </div>
+      )}
+
+      {/* Tabs & Search */}
+      <div className="mb-6 flex flex-col lg:flex-row gap-4 items-center justify-between">
+        <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-100">
           <button
-            onClick={fetchIndents}
-            className="ml-2 underline hover:no-underline"
+            onClick={() => { setActiveTab("pending"); setSelectedIds(new Set()); }}
+            className={`px-6 py-2 rounded-lg font-medium transition-all ${activeTab === "pending" ? "bg-purple-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+              }`}
           >
-            Retry
+            Pending ({pendingCount})
+          </button>
+          <button
+            onClick={() => { setActiveTab("history"); setSelectedIds(new Set()); }}
+            className={`px-6 py-2 rounded-lg font-medium transition-all ${activeTab === "history" ? "bg-purple-600 text-white shadow-md" : "text-gray-500 hover:bg-gray-50"
+              }`}
+          >
+            History ({historyCount})
           </button>
         </div>
-      )}
 
-      {successMessage && (
-        <div className="p-4 mb-6 bg-green-50 rounded-lg border border-green-200">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg
-                className="w-5 h-5 text-green-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-green-800">
-                Cross Check Completed Successfully
-              </h3>
-              <div className="mt-2 text-sm text-green-700">
-                <p>{successMessage}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {errorMessage && (
-        <div className="p-4 mb-6 bg-red-50 rounded-lg border border-red-200">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg
-                className="w-5 h-5 text-red-400"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-              >
-                <path
-                  fillRule="evenodd"
-                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                  clipRule="evenodd"
-                />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">
-                Error Completing Cross Check
-              </h3>
-              <div className="mt-2 text-sm text-red-700">
-                <p>{errorMessage}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Search and Filter Section */}
-      <div className="flex sticky top-0 z-20 flex-col gap-3 px-4 pt-3 pb-3 -mx-4 -mt-3 mb-4 bg-gray-50 sm:flex-row md:-mx-6 md:px-6">
-        {/* Search Bar */}
-        <div className="relative flex-1 min-w-[200px]">
-          <div className="absolute left-3 top-1/2 w-4 h-4 text-gray-400 transform -translate-y-1/2">
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-          </div>
+        <div className="relative w-full lg:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <input
             type="text"
-            placeholder="Search by indent, SKU, item..."
+            placeholder="Search by Item, Indent, Trader..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="py-2 pr-3 pl-9 w-full text-sm bg-white rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none transition-all"
           />
-        </div>
-
-        {/* Date Range Filter */}
-        <div className="flex items-center gap-2">
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className="px-3 py-2 w-36 text-sm bg-white rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <span className="text-gray-400">to</span>
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            className="px-3 py-2 w-36 text-sm bg-white rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          {(startDate || endDate) && (
-            <button
-              onClick={() => {
-                setStartDate("");
-                setEndDate("");
-              }}
-              className="p-1 text-gray-400 rounded-full hover:bg-gray-100"
-              title="Clear dates"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
-        </div>
-
-        {/* Filter Dropdown */}
-        <div className="flex gap-2 items-center">
-          <div className="relative">
-            <select
-              value={filterField}
-              onChange={(e) => {
-                setFilterField(
-                  e.target.value as
-                    | "itemName"
-                    | "shopName"
-                    | "traderName"
-                    | ""
-                );
-                setFilterValue("");
-                setFilterSearch("");
-              }}
-              className="px-3 py-2 pr-8 w-40 text-sm bg-white rounded-lg border border-gray-300 appearance-none outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >
-              <option value="">Filter by...</option>
-              <option value="itemName">Item Name</option>
-              <option value="shopName">Shop Name</option>
-              <option value="traderName">Trader Name</option>
-            </select>
-            <ChevronDown className="absolute right-2 top-1/2 w-4 h-4 text-gray-400 -translate-y-1/2 pointer-events-none" />
-          </div>
-          {filterField && (
-            <div ref={filterRef} className="relative">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder={`Search ${filterField.replace(
-                    "Name",
-                    ""
-                  )}...`}
-                  value={filterSearch}
-                  onChange={(e) => setFilterSearch(e.target.value)}
-                  onFocus={() => setShowFilterDropdown(true)}
-                  onClick={() => setShowFilterDropdown(true)}
-                  className="px-3 py-2 pr-8 w-40 text-sm bg-white rounded-lg border border-gray-300 outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
-                <Search className="absolute right-2 top-1/2 w-4 h-4 text-gray-400 -translate-y-1/2" />
-              </div>
-
-              {/* Clear Filter Button */}
-              {(filterValue || filterSearch) && (
-                <button
-                  onClick={() => {
-                    setFilterValue("");
-                    setFilterSearch("");
-                  }}
-                  className="absolute -top-2 -right-2 p-1 text-xs text-white bg-red-500 rounded-full transition-colors hover:bg-red-600"
-                  title="Clear filter"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              )}
-
-              {/* Dropdown with searchable options */}
-              {showFilterDropdown && filterOptions.length > 0 && (
-                <div className="overflow-auto absolute z-50 mt-1 w-64 max-h-60 bg-white rounded-lg border border-gray-200 shadow-lg">
-                  {filterOptions
-                    .filter((option: string) =>
-                      option
-                        .toLowerCase()
-                        .includes(filterSearch.toLowerCase())
-                    )
-                    .map((option: string) => (
-                      <div
-                        key={option}
-                        className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${
-                          filterValue === option ? "bg-blue-100" : ""
-                        }`}
-                        onClick={() => {
-                          setFilterValue(option);
-                          setFilterSearch(option);
-                          setShowFilterDropdown(false);
-                        }}
-                      >
-                        {option}
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Column Filter Button */}
-        <div className="relative">
-          <button
-            onClick={() => setShowColumnFilter(!showColumnFilter)}
-            className="flex gap-2 justify-center items-center px-3 py-2 w-full text-sm text-white whitespace-nowrap bg-blue-600 rounded-lg transition-colors hover:bg-blue-700 sm:w-auto"
-          >
-            <FileText className="w-4 h-4" />
-            Columns
-          </button>
-
-          {/* Column Filter Dropdown */}
-          {showColumnFilter && (
-            <>
-              {/* Backdrop for mobile */}
-              <div
-                className="fixed inset-0 z-30 bg-black bg-opacity-25 sm:hidden"
-                onClick={() => setShowColumnFilter(false)}
-              ></div>
-
-              <div className="fixed sm:absolute left-0 right-0 sm:left-auto sm:right-0 bottom-0 sm:bottom-auto top-auto sm:top-full sm:mt-2 w-full sm:w-80 bg-white rounded-t-2xl sm:rounded-lg shadow-2xl border-t sm:border border-gray-200 z-40 max-h-[70vh] sm:max-h-96 overflow-hidden flex flex-col">
-                <div className="flex justify-between items-center p-4 border-b border-gray-200">
-                  <h3 className="font-semibold text-gray-900">
-                    Show/Hide Columns
-                  </h3>
-                  <button
-                    onClick={() => setShowColumnFilter(false)}
-                    className="text-gray-500 sm:hidden hover:text-gray-700"
-                  >
-                    ✕
-                  </button>
-                </div>
-                <div className="overflow-y-auto p-4">
-                  <div className="space-y-1">
-                    {Object.entries(columnLabels).map(([key, label]) => (
-                      <label
-                        key={key}
-                        className="flex gap-2 items-center p-2 rounded transition-colors cursor-pointer hover:bg-gray-50"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={
-                            columnVisibility[key as keyof ColumnVisibility]
-                          }
-                          onChange={() =>
-                            toggleColumn(key as keyof ColumnVisibility)
-                          }
-                          className="w-4 h-4 text-blue-600 rounded cursor-pointer focus:ring-2 focus:ring-blue-500"
-                        />
-                        <span className="text-sm text-gray-700">{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="mb-6 border-b border-gray-200">
-        <nav className="flex -mb-px space-x-8">
-          <button
-            onClick={() => setActiveTab("pending")}
-            className={`py-2 px-1 border-b-2 font-medium text-sm transition ${
-              activeTab === "pending"
-                ? "border-purple-500 text-purple-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            <div className="flex gap-2 items-center">
-              <Package className="w-4 h-4" />
-              <span>Pending ({pendingCount})</span>
-            </div>
-          </button>
-          <button
-            onClick={() => setActiveTab("history")}
-            className={`py-2 px-1 border-b-2 font-medium text-sm transition ${
-              activeTab === "history"
-                ? "border-purple-500 text-purple-600"
-                : "border-transparent text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            <div className="flex gap-2 items-center">
-              <CheckCircle className="w-4 h-4" />
-              <span>History ({historyCount})</span>
-            </div>
-          </button>
-        </nav>
-      </div>
-
-      {/* Desktop Table */}
-      <div className="hidden bg-white rounded-xl border border-gray-200 shadow-lg lg:block">
-        <div className="overflow-x-auto w-full">
-          <div className="max-h-[70vh] overflow-y-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="sticky top-0 z-10 bg-gray-100">
-                <tr>
-                  {columnVisibility.action && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Action
-                    </th>
-                  )}
-                  {columnVisibility.indentNumber && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Indent No.
-                    </th>
-                  )}
-                  {columnVisibility.shopName && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Shop
-                    </th>
-                  )}
-                  {columnVisibility.traderName && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Trader Name
-                    </th>
-                  )}
-                  {columnVisibility.pendingReceivingQty &&
-                    activeTab === "history" && (
-                      <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                        Pending Receiving Qty
-                      </th>
+      {/* Table Section */}
+      <div className="bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-gray-50/50 border-b border-gray-100">
+                {columnVisibility.action && (
+                  <th className="px-6 py-4">
+                    {activeTab === "pending" ? (
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.size === currentIndents.length && currentIndents.length > 0}
+                        onChange={toggleSelectAll}
+                        className="w-5 h-5 text-purple-600 rounded-lg border-gray-300 focus:ring-purple-500 transition-all cursor-pointer"
+                      />
+                    ) : (
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Status</span>
                     )}
-                  {columnVisibility.liftingDate && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Lifting Date
-                    </th>
-                  )}
-                  {columnVisibility.liftingQty && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Lifting Qty
-                    </th>
-                  )}
-                  {columnVisibility.itemName && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Item
-                    </th>
-                  )}
-                  {columnVisibility.transporterName && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Transporter
-                    </th>
-                  )}
-                  {columnVisibility.transportCopy && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Transport Copy
-                    </th>
-                  )}
-                  {columnVisibility.billCopy && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Bill Copy
-                    </th>
-                  )}
-                  {activeTab === "history" && columnVisibility.difference && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Difference
-                    </th>
-                  )}
-                  {activeTab === "history" && columnVisibility.remarks && (
-                    <th className="px-6 py-3 text-xs font-medium text-left text-gray-500 uppercase">
-                      Remarks
-                    </th>
-                  )}
-                </tr>
-              </thead>
-              <tbody key={activeTab} className="bg-white divide-y divide-gray-200">
-                {currentIndents.map((indent) => (
-                  <TableRow
-                    key={indent.id}
-                    indent={indent}
-                    activeTab={activeTab}
-                    onCrossCheck={handleCrossCheck}
-                    onViewImage={handleViewImage}
-                    columnVisibility={columnVisibility}
-                  />
-                ))}
-              </tbody>
-            </table>
-
-            {currentIndents.length === 0 && (
-              <div className="py-12 text-center">
-                <Package className="mx-auto mb-3 w-12 h-12 text-gray-400" />
-                <p className="text-gray-500">
-                  No {activeTab === "pending" ? "pending" : "received"} items
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile Cards - Nuclear Fix: key={activeTab} forces full list remount */}
-      <div key={activeTab} className="space-y-4 lg:hidden">
-        {currentIndents.map((indent) => (
-          <div key={indent.id} className="p-4 bg-white rounded-xl shadow-lg">
-            <div className="flex justify-between items-start mb-3">
-              <div>
-                <div className="font-semibold text-gray-900">
-                  {indent.indentNumber}
-                </div>
-                <div className="text-xs text-gray-500">
-                  {new Date(indent.orderDate).toLocaleDateString()}
-                </div>
-              </div>
-              {activeTab === "pending" && isTrulyEmpty(indent.actual7) && (
-                <button
-                  onClick={() => handleCrossCheck(indent)}
-                  className="flex items-center gap-1 px-3 py-1.5 text-sm text-white bg-purple-600 rounded-lg hover:bg-purple-700"
-                >
-                  <Package className="w-4 h-4" />
-                  <span>Receive</span>
-                </button>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-              <div>
-                <span className="text-xs text-gray-500">Shop</span>
-                <div>{indent.shopName}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">Trader Name</span>
-                <div>{indent.traderName}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">Lifting Date</span>
-                <div>{formatDateOnly(indent.liftingDate || indent.actualAF)}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500 font-semibold text-blue-600">Lifting Qty</span>
-                <div className="font-semibold text-blue-600">{indent.liftingData?.qty || "-"}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">Item</span>
-                <div>{indent.itemName}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">Sizes</span>
-                <div>{indent.sizes?.join(", ") || "-"}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">Transporter</span>
-                <div>{indent.transporterName || "-"}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">QTY</span>
-                <div>{indent.liftingData?.qty || "-"}</div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">Transport Copy</span>
-                <div>
-                  {indent.liftingData?.transportCopy ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleViewImage(indent.liftingData!.transportCopy!);
-                      }}
-                      className="font-medium text-blue-600 hover:text-blue-800"
-                    >
-                      View
-                    </button>
-                  ) : (
-                    <span className="text-gray-400">-</span>
-                  )}
-                </div>
-              </div>
-              <div>
-                <span className="text-xs text-gray-500">Bill Copy</span>
-                <div>
-                  {indent.liftingData?.billCopy ? (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleViewImage(indent.liftingData!.billCopy!);
-                      }}
-                      className="font-medium text-blue-600 hover:text-blue-800"
-                    >
-                      View
-                    </button>
-                  ) : (
-                    <span className="text-gray-400">-</span>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {activeTab === "history" && (
-              <div className="pt-2 mt-2 space-y-1 text-sm border-t border-gray-200">
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Pending Receiving Qty</span>
-                  <span>{indent.pendingReceivingQty || "-"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Received</span>
-                  <span>{indent.receivedQty || "-"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Difference</span>
-                  <span>{indent.difference || "-"}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-500">Remark</span>
-                  <span>{indent.receiveRemarks || "-"}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Receive Modal */}
-      {showModal && selectedIndent && (
-        <div className="flex fixed inset-0 z-50 justify-center items-center p-4 bg-black bg-opacity-50">
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-xl shadow-xl">
-            <div className="flex sticky top-0 justify-between items-center p-4 bg-white border-b md:p-6">
-              <h2 className="text-xl font-bold text-gray-900 md:text-2xl">
-                Cross Check & Receive
-              </h2>
-              <button
-                onClick={() => {
-                  setShowModal(false);
-                  setSelectedIndent(null);
-                }}
-                className="p-1 text-gray-500 hover:text-gray-700"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-4 md:p-6">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Indent Number
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedIndent.indentNumber}
-                    readOnly
-                    className="p-3 mt-1 w-full bg-gray-50 rounded-lg border"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Shop Name
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedIndent.shopName}
-                    readOnly
-                    className="p-3 mt-1 w-full bg-gray-50 rounded-lg border"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Trader Name
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedIndent.traderName}
-                    readOnly
-                    className="p-3 mt-1 w-full bg-gray-50 rounded-lg border"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Lifting Date
-                  </label>
-                  <input
-                    type="text"
-                    value={formatDateOnly(selectedIndent.liftingDate || selectedIndent.actualAF)}
-                    readOnly
-                    className="p-3 mt-1 w-full bg-gray-50 rounded-lg border"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Order Qty
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedIndent.reorderQuantityPcs || ""}
-                    readOnly
-                    className="p-3 mt-1 w-full bg-gray-50 rounded-lg border"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Lifting Qty
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedIndent.liftingData?.qty || ""}
-                    readOnly
-                    className="p-3 mt-1 w-full bg-gray-50 rounded-lg border"
-                  />
-                </div>
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block mb-1 text-sm font-medium text-gray-700">
-                  Receiver Name <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={receiveData.receiverName}
-                  onChange={(e) => setReceiveData(prev => ({ ...prev, receiverName: e.target.value }))}
-                  className="p-3 w-full rounded-lg border focus:ring-2 focus:ring-purple-500"
-                  required
-                >
-                  <option value="">Select Receiver</option>
-                  {receiverNames.map(name => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Received Qty
-                </label>
-                <input
-                  type="number"
-                  value={receiveData.receivedQty}
-                  onChange={(e) => handleReceivedQtyChange(e.target.value)}
-                  placeholder="Enter received quantity"
-                  className="p-3 w-full rounded-lg border focus:ring-2 focus:ring-purple-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block mb-2 text-sm font-medium text-gray-700">
-                  Difference
-                </label>
-                <input
-                  type="text"
-                  value={receiveData.difference}
-                  onChange={(e) =>
-                    setReceiveData((p) => ({ ...p, difference: e.target.value }))
-                  }
-                  className="p-3 w-full rounded-lg border focus:ring-2 focus:ring-purple-500"
-                  placeholder="Difference"
-                />
-              </div>
-
-              <div>
-                <label className="flex gap-1 items-center mb-2 text-sm font-medium text-gray-700">
-                  <FileText className="w-4 h-4" /> Remark
-                </label>
-                <textarea
-                  value={receiveData.receiveRemarks}
-                  onChange={(e) =>
-                    setReceiveData((p) => ({
-                      ...p,
-                      receiveRemarks: e.target.value,
-                    }))
-                  }
-                  rows={3}
-                  placeholder="Enter any remarks..."
-                  className="p-3 w-full rounded-lg border focus:ring-2 focus:ring-purple-500"
-                />
-              </div>
-            </div>
-
-            <div className="flex flex-col-reverse gap-3 p-4 md:flex-row md:justify-end md:p-6">
-              <button
-                onClick={() => {
-                  setShowModal(false);
-                  setSelectedIndent(null);
-                }}
-                className="px-6 py-2 w-full text-gray-700 rounded-lg border md:w-auto hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmitReceive}
-                disabled={!receiveData.receivedQty.trim() || isSubmitting}
-                className="flex gap-2 justify-center items-center px-6 py-2 w-full text-white bg-purple-600 rounded-lg md:w-auto hover:bg-purple-700 disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <>
-                    <div className="w-4 h-4 rounded-full border-2 border-white animate-spin border-t-transparent" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  "Submit Receive"
+                  </th>
                 )}
-              </button>
-            </div>
-          </div>
+                {columnVisibility.orderQty && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Order qty</th>}
+                {columnVisibility.poQty && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Po Qty</th>}
+                {columnVisibility.itemName && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Item Name</th>}
+                {columnVisibility.transporterName && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Transporter Name</th>}
+                {columnVisibility.traderName && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Trader name</th>}
+                {columnVisibility.receivingQty && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Receiving Qty</th>}
+                {columnVisibility.diff && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Diff</th>}
+                {columnVisibility.receiverName && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Receiver Name</th>}
+                {columnVisibility.remarks && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Remarks</th>}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {currentIndents.map((indent) => (
+                <TableRow
+                  key={indent.id}
+                  indent={indent}
+                  activeTab={activeTab}
+                  isSelected={selectedIds.has(indent.id)}
+                  onSelect={toggleSelect}
+                  editData={rowEdits[indent.id]}
+                  onEdit={handleRowEdit}
+                  diff={calculateDiff(indent.id)}
+                  columnVisibility={columnVisibility}
+                />
+              ))}
+              {currentIndents.length === 0 && (
+                <tr>
+                  <td colSpan={10} className="px-6 py-20 text-center">
+                    <div className="flex flex-col items-center gap-3 text-gray-400">
+                      <Package className="w-12 h-12 opacity-20" />
+                      <p className="font-medium text-lg">No records found</p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
     </div>
   );
 };
