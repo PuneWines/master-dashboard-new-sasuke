@@ -407,7 +407,7 @@ const Payroll = () => {
           const extraAdvDed = extraDedIdx !== -1 ? (Number(row[extraDedIdx]) || 0) : 0;
           const fixAdvDed = fixDedIdx !== -1 ? (Number(row[fixDedIdx]) || 0) : 0;
           
-          row[totalSalIdx] = Math.ceil((monthlySalary / daysInMonth) * calculatedPresent) - brackage - medical - extraAdvDed - fixAdvDed;
+          row[totalSalIdx] = Math.ceil((monthlySalary / daysInMonth) * calculatedPresent) - brackage - extraAdvDed - fixAdvDed;
         }
 
         return row;
@@ -738,7 +738,7 @@ const Payroll = () => {
 
           updatedRow[daysMonthIdx] = daysInMonth;
 
-          const totalSalary = Math.ceil((monthlySalary / daysInMonth) * totalPresent) - brackage - medical - fixAdvDed - extraAdvDed;
+          const totalSalary = Math.ceil((monthlySalary / daysInMonth) * totalPresent) - brackage - fixAdvDed - extraAdvDed;
           updatedRow[totalSalIdx] = totalSalary;
         }
       }

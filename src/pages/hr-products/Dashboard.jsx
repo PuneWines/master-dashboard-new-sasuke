@@ -106,15 +106,9 @@ const Dashboard = () => {
 
   const fetchJoiningCount = async () => {
     try {
-      const response = await fetch(SCRIPT_URLS.HR_JOINING, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({
-          action: "fetch",
-          sheet: "JOINING",
-          spreadsheetId: HR_SPREADSHEET_ID
-        })
-      });
+      const response = await fetch(
+        `${SCRIPT_URLS.HR_JOINING}?sheet=JOINING&action=fetch`
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
@@ -226,15 +220,9 @@ const Dashboard = () => {
 
   const fetchLeaveCount = async () => {
     try {
-      const response = await fetch(SCRIPT_URLS.HR_JOINING, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain" },
-        body: JSON.stringify({
-          action: "fetch",
-          sheet: "LEAVING",
-          spreadsheetId: HR_SPREADSHEET_ID
-        })
-      });
+      const response = await fetch(
+        `${SCRIPT_URLS.HR_JOINING}?sheet=LEAVING&action=fetch`
+      );
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

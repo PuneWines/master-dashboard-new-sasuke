@@ -2870,6 +2870,30 @@ export const indentService: IndentService = {
     }
   },
 
+  async updatePurchaseSheetData(
+    sheetName: string,
+    matchCriteria: Record<string, string>,
+    updates: Record<string, any>
+  ): Promise<void> {
+    if (!SCRIPT_URL) throw new Error("Script URL not configured");
+    const url = new URL(SCRIPT_URL, _isBrowser ? window.location.origin : "http://localhost");
+    const body = {
+      action: "update",
+      sheetId: SHEET_ID,
+      sheet: sheetName,
+      matchCriteria,
+      updates,
+    };
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const result = await response.json();
+    if (!result.success) throw new Error(result.message || "Update failed");
+  },
+
   async fetchMasterSheetData(sheetId: string, sheetName: string): Promise<any[]> {
     if (!SCRIPT_URL) return [];
     try {

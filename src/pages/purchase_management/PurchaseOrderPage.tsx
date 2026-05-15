@@ -5,6 +5,7 @@ import { indentService, VendorMasterEntry, POContactEntry, TransporterVerificati
 import { storageUtils } from "../../utils/purchase_management/storage";
 import { generatePOPDF } from "../../utils/purchase_management/pdfGenerator";
 import { SuccessAnimation } from "./SuccessAnimation";
+import toast from "react-hot-toast";
 
 // Helper to format timestamp as DD/MM/YYYY HH:mm:ss
 const formatTimestamp = (date: Date): string => {
@@ -162,7 +163,7 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
     fetchMaster();
   }, []);
 
-  const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
+  const [deletedItems, setDeletedItems] = useState<Set<POIndentItem>>(new Set());
   const [localIndents, setLocalIndents] = useState<POIndentItem[]>(indents);
 
   const updateShopName = (id: string, newShopName: string) => {
@@ -189,16 +190,45 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
 
   const visibleTraderIndents = traderIndents.filter(
     (i: POIndentItem) =>
-      !deletedIds.has(i.id) &&
+      !deletedItems.has(i) &&
       i.shopManagerStatus === "Approved" &&
       !isProcessed(i, processedIndentNumbers)
   );
 
   // Always include the selected indent, even if it doesn't match the filters
   const finalVisibleIndents =
-    indent && !visibleTraderIndents.find((i) => i.id === indent.id)
+    indent && !visibleTraderIndents.find((i) => i === indent) && !deletedItems.has(indent)
       ? [indent, ...visibleTraderIndents]
       : visibleTraderIndents;
+
+  const handleDeleteClick = (item: POIndentItem) => {
+    if (finalVisibleIndents.length === 1) {
+      toast((t) => (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm font-medium">This is the last row. Delete it?</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setDeletedItems((prev) => new Set(prev).add(item));
+                toast.dismiss(t.id);
+              }}
+              className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
+            >
+              OK, Delete
+            </button>
+            <button
+              onClick={() => toast.dismiss(t.id)}
+              className="px-3 py-1 bg-gray-200 text-gray-700 rounded text-sm hover:bg-gray-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ), { duration: Infinity });
+    } else {
+      setDeletedItems((prev) => new Set(prev).add(item));
+    }
+  };
 
   const uniqueShopNames = Array.from(
     new Set(finalVisibleIndents.map((i) => i.shopName?.trim()).filter(Boolean))
@@ -292,11 +322,7 @@ const POGenerateModal: React.FC<POGenerateModalProps> = ({
                         <td className="px-2 py-2 border border-gray-300 text-center">{formatNumber(i.reorderQuantityPcs)}</td>
                         <td className="px-4 py-2 border border-gray-300">
                           <button
-                            onClick={() =>
-                              setDeletedIds((prev: Set<string>) =>
-                                new Set(prev).add(i.id)
-                              )
-                            }
+                            onClick={() => handleDeleteClick(i)}
                             className="px-2 py-1 text-xs text-white bg-red-500 rounded hover:bg-red-600"
                           >
                             Delete

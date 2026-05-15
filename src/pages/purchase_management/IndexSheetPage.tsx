@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Search, Loader2 } from "lucide-react";
 import { indentService, IndentItem } from "../../services/purchase_management/indentService";
+import toast from "react-hot-toast";
 
 export const IndexSheetPage: React.FC = () => {
   const [indents, setIndents] = useState<IndentItem[]>([]);
@@ -21,10 +22,10 @@ export const IndexSheetPage: React.FC = () => {
         const data = await indentService.getIndents();
         setIndents(data);
         
-        // Initialize edited data map
+        // Initialize edited data map keyed by array index (not id, since ids may not be unique)
         const initialEdits: Record<string, any> = {};
-        data.forEach(indent => {
-          initialEdits[indent.id] = {
+        data.forEach((indent, idx) => {
+          initialEdits[idx] = {
             perDayAvgSaleFix: indent.perDayAvgSaleFix || 0,
             reorderQuantityPcs: indent.reorderQuantityPcs || 0,
             reorderQuantityBox: indent.reorderQuantityBox || 0,
@@ -52,15 +53,15 @@ export const IndexSheetPage: React.FC = () => {
     );
   });
 
-  const handleFieldChange = (id: string, field: string, value: string) => {
+  const handleFieldChange = (rowIdx: number, field: string, value: string) => {
     const numValue = value === "" ? 0 : parseFloat(value);
-    
+
     setEditedData(prev => {
-      const current = prev[id] || {};
+      const current = prev[rowIdx] || {};
       const updated = { ...current, [field]: numValue };
-      
-      const indent = indents.find(i => i.id === id);
-      if (!indent) return { ...prev, [id]: updated };
+
+      const indent = indents[rowIdx];
+      if (!indent) return { ...prev, [rowIdx]: updated };
 
       // Auto Calculation Logic
       // Suggested Order Quantity = (Avg Sale × Number of Days) – Closing Stock
@@ -89,7 +90,7 @@ export const IndexSheetPage: React.FC = () => {
         updated.reorderQuantityPcs = Math.round(numValue * bpc);
       }
       
-      return { ...prev, [id]: updated };
+      return { ...prev, [rowIdx]: updated };
     });
   };
 
@@ -97,29 +98,58 @@ export const IndexSheetPage: React.FC = () => {
     setOrderDays(days);
     setEditedData(prev => {
       const newEdits = { ...prev };
-      indents.forEach(indent => {
-        if (!newEdits[indent.id]) return;
-        const avgSale = newEdits[indent.id].perDayAvgSaleFix || 0;
+      indents.forEach((indent, idx) => {
+        if (!newEdits[idx]) return;
+        const avgSale = newEdits[idx].perDayAvgSaleFix || 0;
         const closingStock = indent.closingStock || 0;
         const bpc = indent.bottlesPerCase || 1;
-        
+
         let suggestedBottles = (avgSale * days) - closingStock;
         if (suggestedBottles < 0) suggestedBottles = 0;
-        
-        newEdits[indent.id].reorderQuantityPcs = Math.round(suggestedBottles);
-        newEdits[indent.id].reorderQuantityBox = Number((suggestedBottles / bpc).toFixed(2));
+
+        newEdits[idx].reorderQuantityPcs = Math.round(suggestedBottles);
+        newEdits[idx].reorderQuantityBox = Number((suggestedBottles / bpc).toFixed(2));
       });
       return newEdits;
     });
   };
 
-  const handleSaveData = () => {
+  const handleSaveData = async () => {
     setIsSaving(true);
-    // Here we would normally call indentService to save `editedData` back to the backend
-    setTimeout(() => {
-      alert("Index Data Saved Successfully!");
+    try {
+      await Promise.all(
+        indents.map((indent, idx) => {
+          const edited = editedData[idx];
+          if (!edited) return Promise.resolve();
+
+          // Only include fields that actually changed from original
+          const updates: Record<string, any> = {};
+          if (edited.perDayAvgSaleFix !== (indent.perDayAvgSaleFix || 0))
+            updates["Per Day Avg Sale Fix"] = edited.perDayAvgSaleFix;
+          if (edited.reorderQuantityPcs !== (indent.reorderQuantityPcs || 0))
+            updates["Order In Bottles"] = edited.reorderQuantityPcs;
+          if (edited.reorderQuantityBox !== (indent.reorderQuantityBox || 0))
+            updates["Order In Box"] = edited.reorderQuantityBox;
+
+          if (Object.keys(updates).length === 0) return Promise.resolve();
+
+          return indentService.updatePurchaseSheetData(
+            "Python Order Data",
+            {
+              "Indent No": indent.indentNumber,
+              "Item Name": indent.itemName,
+            },
+            updates
+          );
+        })
+      );
+      toast.success("Saved successfully!");
+    } catch (err) {
+      console.error("Save failed:", err);
+      toast.error("Failed to save. Please try again.");
+    } finally {
       setIsSaving(false);
-    }, 1000);
+    }
   };
 
   return (
@@ -210,8 +240,10 @@ export const IndexSheetPage: React.FC = () => {
                     </td>
                   </tr>
                 ) : (
-                  filteredIndents.map((indent, idx) => (
-                    <tr key={indent.id || idx} className="hover:bg-gray-50 transition-colors">
+                  filteredIndents.map((indent, idx) => {
+                    const originalIdx = indents.indexOf(indent);
+                    return (
+                    <tr key={originalIdx} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 text-gray-600">{indent.shopId || "-"}</td>
                       <td className="px-6 py-4 font-medium text-gray-900">{indent.shopName || "-"}</td>
                       <td className="px-6 py-4 font-mono text-blue-600">{indent.indentNumber || "-"}</td>
@@ -227,32 +259,33 @@ export const IndexSheetPage: React.FC = () => {
                       <td className="px-6 py-4 font-medium text-gray-800">{indent.closingStock ?? "-"}</td>
                       <td className="px-6 py-4 text-gray-600">{indent.closingStockInBox ?? "-"}</td>
                       <td className="px-6 py-4 text-gray-600">
-                        <input 
-                          type="number" 
-                          value={editedData[indent.id]?.perDayAvgSaleFix ?? ""}
-                          onChange={(e) => handleFieldChange(indent.id, 'perDayAvgSaleFix', e.target.value)}
+                        <input
+                          type="number"
+                          value={editedData[originalIdx]?.perDayAvgSaleFix ?? ""}
+                          onChange={(e) => handleFieldChange(originalIdx, 'perDayAvgSaleFix', e.target.value)}
                           className="w-20 px-2 py-1 border border-gray-300 rounded outline-none focus:border-blue-500"
                         />
                       </td>
                       <td className="px-6 py-4 text-gray-600">{indent.perDayAvgSaleLastWeek ?? "-"}</td>
                       <td className="px-6 py-4 font-medium text-green-600">
-                        <input 
-                          type="number" 
-                          value={editedData[indent.id]?.reorderQuantityPcs ?? ""}
-                          onChange={(e) => handleFieldChange(indent.id, 'reorderQuantityPcs', e.target.value)}
+                        <input
+                          type="number"
+                          value={editedData[originalIdx]?.reorderQuantityPcs ?? ""}
+                          onChange={(e) => handleFieldChange(originalIdx, 'reorderQuantityPcs', e.target.value)}
                           className="w-20 px-2 py-1 border border-gray-300 rounded outline-none focus:border-blue-500 font-bold text-blue-600"
                         />
                       </td>
                       <td className="px-6 py-4 font-medium text-green-600">
-                        <input 
-                          type="number" 
-                          value={editedData[indent.id]?.reorderQuantityBox ?? ""}
-                          onChange={(e) => handleFieldChange(indent.id, 'reorderQuantityBox', e.target.value)}
+                        <input
+                          type="number"
+                          value={editedData[originalIdx]?.reorderQuantityBox ?? ""}
+                          onChange={(e) => handleFieldChange(originalIdx, 'reorderQuantityBox', e.target.value)}
                           className="w-20 px-2 py-1 border border-gray-300 rounded outline-none focus:border-blue-500 font-bold text-blue-600"
                         />
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
