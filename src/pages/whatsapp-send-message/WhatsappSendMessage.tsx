@@ -229,7 +229,7 @@ const WhatsappSendMessage: React.FC = () => {
         setIsLoadingShops(true);
         setStatus({ message: '', type: '' });
         try {
-            const data = await requestGAS({ action: 'getShopNames' }, 'POST');
+            const data = await requestGAS({ action: 'getShopNames' }, 'GET');
             setShopNames(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load shops: ${err.message}`, type: 'error' });
