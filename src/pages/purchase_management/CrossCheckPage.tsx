@@ -85,6 +85,7 @@ interface IndentItem {
   // From Cross Check
   receiveStatus?: "All Okay" | "Not Okay";
   receivedQty?: string;
+  remainingQty?: string;
   difference?: string;
   receiveRemarks?: string;
 
@@ -119,6 +120,7 @@ interface ColumnVisibility {
   poQty: boolean;
   receivingQty: boolean;
   diff: boolean;
+  remainingQty: boolean;
   receiverName: boolean;
 }
 
@@ -140,8 +142,8 @@ const TableRow = React.memo(
     activeTab: "pending" | "history";
     isSelected: boolean;
     onSelect: (id: string) => void;
-    editData: { receivedQty: string; receiveRemarks: string };
-    onEdit: (id: string, field: "receivedQty" | "receiveRemarks", value: string) => void;
+    editData: { receivedQty: string; receiveRemarks: string; remainingQty?: string };
+    onEdit: (id: string, field: "receivedQty" | "receiveRemarks" | "remainingQty", value: string) => void;
     diff: number;
     columnVisibility: ColumnVisibility;
   }) => {
@@ -201,29 +203,57 @@ const TableRow = React.memo(
           </td>
         )}
 
-        {/* Receiving Qty */}
+        {/* Receiving Qty - from BF column */}
         {columnVisibility.receivingQty && (
+          <td className="px-6 py-4 whitespace-nowrap">
+            <span className="text-sm font-medium text-gray-900">
+              {indent.receivedQty || "-"}
+            </span>
+          </td>
+        )}
+
+        {/* Diff - from BG column (difference field) */}
+        {columnVisibility.diff && (
+          <td className="px-6 py-4 whitespace-nowrap">
+            {(() => {
+              const raw = String(indent.difference || "").trim();
+              const diffVal = raw === "" || raw === "." || raw === "-" ? 0 : (Number(raw) || 0);
+              return (
+                <span className={`text-sm font-bold ${diffVal === 0 ? "text-green-600" : "text-red-600"}`}>
+                  {diffVal}
+                </span>
+              );
+            })()}
+          </td>
+        )}
+
+        {/* Remaining Qty = Order Qty (Pcs) - Receiving Qty (BF) */}
+        {columnVisibility.remainingQty && (
           <td className="px-6 py-4 whitespace-nowrap">
             {isPending ? (
               <input
                 type="number"
-                value={editData?.receivedQty || ""}
-                onChange={(e) => onEdit(indent.id, "receivedQty", e.target.value)}
-                className="w-24 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
-                placeholder="Qty"
+                value={editData?.remainingQty !== undefined ? editData.remainingQty : (() => {
+                  const receivedQty = parseFloat(String(indent.receivedQty || "0")) || 0;
+                  const orderQty = parseFloat(String(indent.reorderQuantityPcs || "0")) || 0;
+                  return orderQty - receivedQty;
+                })()}
+                onChange={(e) => onEdit(indent.id, "remainingQty", e.target.value)}
+                className="w-24 px-3 py-1.5 text-sm text-blue-600 font-medium border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
+                placeholder="0"
               />
             ) : (
-              <span className="text-sm text-gray-900 font-medium">{indent.receivedQty}</span>
+              (() => {
+                const receivedQty = parseFloat(String(indent.receivedQty || "0")) || 0;
+                const orderQty = parseFloat(String(indent.reorderQuantityPcs || "0")) || 0;
+                const remaining = orderQty - receivedQty;
+                return (
+                  <span className={`text-sm font-bold ${remaining <= 0 ? "text-green-600" : "text-orange-500"}`}>
+                    {remaining}
+                  </span>
+                );
+              })()
             )}
-          </td>
-        )}
-
-        {/* Diff */}
-        {columnVisibility.diff && (
-          <td className="px-6 py-4 whitespace-nowrap">
-            <span className={`text-sm font-bold ${diff === 0 ? "text-green-600" : "text-red-600"}`}>
-              {isPending ? diff : indent.difference}
-            </span>
           </td>
         )}
 
@@ -240,9 +270,9 @@ const TableRow = React.memo(
             {isPending ? (
               <input
                 type="text"
-                value={editData?.receiveRemarks || ""}
+                value={editData?.receiveRemarks !== undefined ? editData.receiveRemarks : (indent.receiveRemarks || "")}
                 onChange={(e) => onEdit(indent.id, "receiveRemarks", e.target.value)}
-                className="w-48 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-purple-500 focus:border-purple-500"
+                className="w-48 px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md focus:ring-2 focus:ring-purple-500 focus:border-purple-500 outline-none transition-all"
                 placeholder="Remarks..."
               />
             ) : (
@@ -304,7 +334,7 @@ export const CrossCheckPage: React.FC = () => {
   // Column filter states
   const [showColumnFilter, setShowColumnFilter] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [rowEdits, setRowEdits] = useState<Record<string, { receivedQty: string; receiveRemarks: string }>>({});
+  const [rowEdits, setRowEdits] = useState<Record<string, { receivedQty: string; receiveRemarks: string; remainingQty?: string }>>({});
   const [poContacts, setPoContacts] = useState<any[]>([]);
 
   const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>({
@@ -316,6 +346,7 @@ export const CrossCheckPage: React.FC = () => {
     traderName: true,
     receivingQty: true,
     diff: true,
+    remainingQty: true,
     receiverName: true,
     remarks: true,
     indentNumber: true,
@@ -624,7 +655,9 @@ export const CrossCheckPage: React.FC = () => {
     if (selectedIds.size === currentIndents.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(currentIndents.map((i) => i.id)));
+      setSelectedIds(new Set(currentIndents.map((indent, index) => 
+        indent._rowIndex ? String(indent._rowIndex) : `${indent.id}-${index}`
+      )));
     }
   };
 
@@ -638,13 +671,16 @@ export const CrossCheckPage: React.FC = () => {
     }));
   };
 
-  const calculateDiff = (id: string) => {
-    const indent = indents.find(i => i.id === id);
-    const edit = rowEdits[id];
-    if (!indent || !edit) return 0;
+  const calculateDiff = (uniqueKey: string) => {
+    const indent = currentIndents.find((i, index) => {
+      const k = i._rowIndex ? String(i._rowIndex) : `${i.id}-${index}`;
+      return k === uniqueKey;
+    });
+    const edit = rowEdits[uniqueKey];
+    if (!indent) return 0;
     
     const poQty = Number(indent.poQty || 0);
-    const received = Number(edit.receivedQty || 0);
+    const received = edit?.receivedQty !== undefined ? Number(edit.receivedQty) : Number(indent.receivedQty || 0);
     
     // User requirement: PO Qty - Receiving Qty
     return poQty - received;
@@ -656,18 +692,37 @@ export const CrossCheckPage: React.FC = () => {
     setIsSubmitting(true);
     setErrorMessage("");
 
-    const itemsToSubmit = Array.from(selectedIds).map(id => {
-      const indent = indents.find(i => i.id === id);
-      const edit = rowEdits[id];
+    const itemsToSubmit = Array.from(selectedIds).map(uniqueKey => {
+      // Find by matching the uniqueKey logic we used in rendering
+      const indent = currentIndents.find((i, index) => {
+        const k = i._rowIndex ? String(i._rowIndex) : `${i.id}-${index}`;
+        return k === uniqueKey;
+      });
+      
+      const edit = rowEdits[uniqueKey];
       const now = formatTimestamp(new Date());
-      const diff = calculateDiff(id);
+      
+      const received = parseFloat(edit?.receivedQty !== undefined ? edit.receivedQty : (indent?.receivedQty || "0")) || 0;
+      const orderQty = parseFloat(String(indent?.reorderQuantityPcs || "0")) || 0;
+      
+      // Calculate remaining qty for submission (use edit if present, else formula)
+      const remainingVal = edit?.remainingQty !== undefined 
+        ? edit.remainingQty 
+        : String(orderQty - received);
+
+      // Re-calculate diff for master status
+      const expected = parseFloat(indent?.liftingData?.qty || "0") || 0;
+      const diff = indent?.shopName?.includes("Kunal") || indent?.shopName?.includes("Balaji") 
+        ? orderQty - received 
+        : expected - received;
 
       return {
         id: indent!.id,
         updates: {
           actual7: now,
-          receivedQty: edit.receivedQty,
-          receiveRemarks: edit.receiveRemarks,
+          receivedQty: String(received),
+          receiveRemarks: edit?.receiveRemarks !== undefined ? edit.receiveRemarks : (indent?.receiveRemarks || ""),
+          remainingQty: remainingVal,
           difference: String(diff),
           receiveStatus: (diff === 0 ? "All Okay" : "Not Okay") as "All Okay" | "Not Okay",
           shopName: indent!.shopName,
@@ -931,24 +986,41 @@ export const CrossCheckPage: React.FC = () => {
                 {columnVisibility.traderName && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Trader name</th>}
                 {columnVisibility.receivingQty && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Receiving Qty</th>}
                 {columnVisibility.diff && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Diff</th>}
+                {columnVisibility.remainingQty && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Remaining Qty</th>}
                 {columnVisibility.receiverName && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Receiver Name</th>}
                 {columnVisibility.remarks && <th className="px-6 py-4 text-xs font-bold text-gray-400 uppercase tracking-wider">Remarks</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {currentIndents.map((indent) => (
-                <TableRow
-                  key={indent.id}
-                  indent={indent}
-                  activeTab={activeTab}
-                  isSelected={selectedIds.has(indent.id)}
-                  onSelect={toggleSelect}
-                  editData={rowEdits[indent.id]}
-                  onEdit={handleRowEdit}
-                  diff={calculateDiff(indent.id)}
-                  columnVisibility={columnVisibility}
-                />
-              ))}
+              {currentIndents.map((indent, index) => {
+                const uniqueKey = indent._rowIndex ? String(indent._rowIndex) : `${indent.id}-${index}`;
+                return (
+                  <TableRow
+                    key={uniqueKey}
+                    indent={indent}
+                    activeTab={activeTab}
+                    isSelected={selectedIds.has(uniqueKey)}
+                    onSelect={(id) => {
+                      const newSelected = new Set(selectedIds);
+                      if (newSelected.has(uniqueKey)) {
+                        newSelected.delete(uniqueKey);
+                      } else {
+                        newSelected.add(uniqueKey);
+                      }
+                      setSelectedIds(newSelected);
+                    }}
+                    editData={rowEdits[uniqueKey]}
+                    onEdit={(id, field, value) => {
+                      setRowEdits((prev) => ({
+                        ...prev,
+                        [uniqueKey]: { ...prev[uniqueKey], [field]: value },
+                      }));
+                    }}
+                    diff={calculateDiff(uniqueKey)}
+                    columnVisibility={columnVisibility}
+                  />
+                );
+              })}
               {currentIndents.length === 0 && (
                 <tr>
                   <td colSpan={10} className="px-6 py-20 text-center">

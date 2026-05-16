@@ -35,6 +35,7 @@ export interface IndentItem {
   vehicleNo?: string;
   receiveStatus?: "All Okay" | "Not Okay";
   receivedQty?: string;
+  remainingQty?: string;
   receiveRemarks?: string;
   difference?: string;
   createdAt: string;

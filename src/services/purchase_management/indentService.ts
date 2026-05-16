@@ -170,6 +170,7 @@ export interface IndentItem {
   // Cross-check fields
   receiveStatus?: "All Okay" | "Not Okay";
   receivedQty?: string;
+  remainingQty?: string;
   difference?: string;
   receiveRemarks?: string;
   pendingReceivingQty?: string; // From column AS
@@ -298,6 +299,7 @@ interface IndentService {
   postMasterData(sheetId: string, sheetName: string, data: Record<string, any>): Promise<void>;
   fetchMasterSheetData(sheetId: string, sheetName: string): Promise<any[]>;
   updateMasterSheetData(sheetId: string, sheetName: string, matchCriteria: Record<string, string>, updates: Record<string, any>): Promise<void>;
+  updatePurchaseSheetData(sheetName: string, matchCriteria: Record<string, string>, updates: Record<string, any>): Promise<void>;
   updateIndentsBulkReceived(
     items: {
       id: string;
@@ -848,18 +850,21 @@ export const indentService: IndentService = {
             : undefined;
         })(),
         receivedQty: String(
-          val(item, ["Received Qty", "received_qty", "receivedQty"], "")
+          val(item, ["Received Qty", "received_qty", "receivedQty", "#58"], "") // Column BF
         ),
-        difference: String(val(item, ["Difference", "difference", "#41"], "")), // Column AO
+        remainingQty: String(
+          val(item, ["Remaining Qty", "remaining_qty", "remainingQty", "#5"], "") // Assuming Column E if from received sheet, but let's add #5
+        ),
+        difference: String(val(item, ["Difference", "difference", "#41", "#59"], "")), // Column AO and BG
         receiveRemarks: String(
           val(
             item,
             [
-              "Remark2", // Specific header name
+              "Remark2",           // Specific header name
               "Receive Remarks",
               "receive_remarks",
               "receiveRemarks",
-              "#42", // Column AP
+              "#60",               // Column BH (after BF=receivedQty, BG=difference)
             ],
             ""
           )
@@ -1534,8 +1539,8 @@ export const indentService: IndentService = {
           id,                                                        // Col B - Indent Number
           updates.shopName || "",                                    // Col C - Shop Name
           updates.itemName || "",                                    // Col D - Item Name
-          updates.receivedQty || "",                                 // Col E - Received Qty
-          updates.receiveRemarks || "",                              // Col F - Remark2
+          updates.remainingQty || "",                                // Col E - Remaining Qty
+          updates.receiveRemarks || "",                              // Col F - Remarks
           updates.difference || "",                                  // Col G - Diff
           updates.receiverName || "",                                // Col H - Receiver Name
         ];

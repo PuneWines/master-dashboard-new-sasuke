@@ -42,7 +42,7 @@ import DocLicense from "./pages/document_manager/LicensePage";
 
 // ── Purchase Management Pages ──
 import PurchaseLayout            from "./components/purchase_management/Layout";
-import { Dashboard as PurchaseDashboard } from "./pages/purchase_management/Dashboard";
+import { IMSDashboard as PurchaseDashboard } from "./pages/purchase_management/IMSDashboard";
 import { IndexSheetPage as PurchaseIndexSheet } from "./pages/purchase_management/IndexSheetPage";
 import { TraderForm } from "./pages/purchase_management/public/TraderForm";
 import { TransporterForm } from "./pages/purchase_management/public/TransporterForm";

@@ -1,115 +1,348 @@
-import React, { useState, useEffect } from 'react';
-import { Package, Truck, CheckCircle, AlertTriangle, FileText, Send, Check } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Package,
+  Truck,
+  CheckCircle,
+  AlertTriangle,
+  FileText,
+  Send,
+  Check,
+  RefreshCw,
+  TrendingUp,
+  Clock,
+  ShoppingCart,
+} from 'lucide-react';
 import { indentService } from '../../services/purchase_management/indentService';
+import { storageUtils } from '../../utils/purchase_management/storage';
 
-export const IMSDashboard = () => {
-  const [activeTab, setActiveTab] = useState('dashboard');
-  
-  // Pipeline Steps
-  const pipelineSteps = [
-    { id: 'generated', label: 'Generated', subLabel: 'Python script', count: 12, icon: FileText },
-    { id: 'approved', label: 'Approved', subLabel: 'Purchase team', count: 9, icon: CheckCircle },
-    { id: 'dispatched', label: 'Dispatched', subLabel: 'Trader', count: 7, icon: Send },
-    { id: 'picked_up', label: 'Picked up', subLabel: 'Transporter', count: 5, icon: Truck },
-    { id: 'delivered', label: 'Delivered', subLabel: 'Store manager', count: 3, icon: Package },
-    { id: 'accepted', label: 'Accepted', subLabel: 'Store confirmed', count: 3, icon: Check },
-  ];
+// ─── Types ──────────────────────────────────────────────────────────
+interface GroupedPO {
+  indentNumber: string;
+  partyName: string;
+  shopName: string;
+  items: any[];
+  totalQtyPcs: number;
+  totalQtyBox: number;
+  status: string;
+  statusClass: string;
+  lastEvent: string;
+  approvalDate: string;
+  poNumber: string;
+}
 
-  // Dummy Live Orders
-  const liveOrders = [
-    { po: 'PO-20260418-0001', party: 'Walvekar Sons', items: 6, qty: '2,499.84 ml', status: 'Accepted', event: '09:41 · Store Mgr', statusColor: 'bg-green-100 text-green-800' },
-    { po: 'PO-20260418-0002', party: 'Royal Agency', items: 6, qty: '1,171.32 ml', status: 'Mismatch', event: '10:22 · Transporter', statusColor: 'bg-red-100 text-red-800' },
-    { po: 'PO-20260418-0003', party: 'Millinnium Spirits', items: 15, qty: '821.64 ml', status: 'In Transit', event: '11:05 · Transporter', statusColor: 'bg-purple-100 text-purple-800' },
-    { po: 'PO-20260418-0004', party: 'Wine Enterprises', items: 5, qty: '293.46 ml', status: 'Dispatched', event: '11:48 · Trader', statusColor: 'bg-green-100 text-green-800' },
-  ];
+// ─── Helpers ─────────────────────────────────────────────────────────
+function getStatusForPO(items: any[]): { status: string; statusClass: string; lastEvent: string } {
+  // Use the first item's status fields (they share same PO status)
+  const sample = items[0] || {};
 
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard' },
-    { id: 'trader-module', label: 'Trader Module' },
-    { id: 'transporter-module', label: 'Transporter Module' },
-    { id: 'store-module', label: 'Store Module' },
-  ];
+  if (sample.receiveStatus === 'All Okay') {
+    return { status: 'Accepted', statusClass: 'bg-emerald-50 text-emerald-700 border border-emerald-100', lastEvent: sample.approvalDate || '' };
+  }
+  if (sample.receiveStatus === 'Not Okay' || (sample.difference && Number(sample.difference) !== 0)) {
+    return { status: 'Mismatch', statusClass: 'bg-rose-50 text-rose-700 border border-rose-100', lastEvent: sample.approvalDate || '' };
+  }
+  if (String(sample.transporterStatus || '').trim().toLowerCase() === 'pickup') {
+    return { status: 'In Transit', statusClass: 'bg-indigo-50 text-indigo-700 border border-indigo-100', lastEvent: sample.dispatchDate || '' };
+  }
+  if (String(sample.traderStatus || '').trim().toLowerCase() === 'yes') {
+    return { status: 'Dispatched', statusClass: 'bg-amber-50 text-amber-700 border border-amber-100', lastEvent: sample.dispatchDate || '' };
+  }
+  if (sample.approved === 'Yes' || sample.approvalDate) {
+    return { status: 'Approved', statusClass: 'bg-blue-50 text-blue-700 border border-blue-100', lastEvent: sample.approvalDate || '' };
+  }
+  if (sample.poNumber || sample.poCopyLink) {
+    return { status: 'PO Sent', statusClass: 'bg-purple-50 text-purple-700 border border-purple-100', lastEvent: '' };
+  }
+  return { status: 'Generated', statusClass: 'bg-slate-50 text-slate-600 border border-slate-100', lastEvent: sample.timestamp || '' };
+}
 
-  const handleActionSubmit = (role: string, data: any) => {
-    alert(`${role} Action Submitted!\n\nData: ${JSON.stringify(data, null, 2)}\nTimestamp: ${new Date().toLocaleString()}`);
+function generateTimeline(items: any[]) {
+  const sample = items[0] || {};
+  const events = [];
+
+  const formatTime = (ts: string | undefined) => {
+    if (!ts) return '—';
+    const parts = ts.trim().split(' ');
+    if (parts.length > 1) {
+      const timeParts = parts[parts.length - 1].split(':');
+      return `${timeParts[0]}:${timeParts[1] || '00'}`;
+    }
+    return ts; // fallback if just a date or simple string
   };
 
+  // 1. Generated
+  const isGenerated = Boolean(sample.timestamp);
+  events.push({
+    title: 'Order generated by Python script',
+    desc: isGenerated ? `${items.length} items · ${sample.brandName || ''} range · ${sample.partyName || sample.traderName || 'Unknown Party'}` : `Pending generation`,
+    time: isGenerated ? formatTime(sample.timestamp) : '—',
+    color: isGenerated ? 'bg-blue-500' : 'bg-slate-200'
+  });
+
+  // 2. Approved
+  const isApproved = sample.approved === 'Yes' || Boolean(sample.approvalDate);
+  events.push({
+    title: 'Approved by purchasing team',
+    desc: isApproved ? (sample.approvalRemarks || 'Approved by Purchase') : 'Awaiting approval',
+    time: isApproved ? formatTime(sample.approvalDate || sample.actualAF || sample.actual2) : '—',
+    color: isApproved ? 'bg-amber-600' : 'bg-slate-200'
+  });
+
+  // 3. Dispatched
+  const isDispatched = String(sample.traderStatus || '').trim().toLowerCase() === 'yes';
+  events.push({
+    title: 'Trader dispatched order',
+    desc: isDispatched ? (sample.remarksTrader || 'Dispatch confirmed') : 'Awaiting dispatch',
+    time: isDispatched ? formatTime(sample.dispatchDate || sample.actualAL || sample.actual4) : '—',
+    color: isDispatched ? 'bg-emerald-500' : 'bg-slate-200'
+  });
+
+  // 4. Picked up
+  const isPickedUp = String(sample.transporterStatus || '').trim().toLowerCase() === 'pickup';
+  events.push({
+    title: 'Transporter picked up',
+    desc: isPickedUp ? (sample.transporterRemarks || 'Picked up by transporter') : 'Awaiting pickup',
+    time: isPickedUp ? formatTime(sample.actual6 || sample.dispatchDate) : '—',
+    color: isPickedUp ? 'bg-indigo-500' : 'bg-slate-200'
+  });
+
+  // 5. Received/Accepted or Mismatch
+  const isAllOkay = sample.receiveStatus === 'All Okay';
+  const isMismatch = sample.receiveStatus === 'Not Okay' || (sample.difference && Number(sample.difference) !== 0);
+  
+  if (isAllOkay) {
+    events.push({
+      title: 'Delivered and Accepted',
+      desc: sample.receiveRemarks || 'Store manager confirmed receipt without discrepancies',
+      time: formatTime(sample.actual7 || sample.receiveDate),
+      color: 'bg-green-600'
+    });
+  } else if (isMismatch) {
+    events.push({
+      title: 'Mismatch flagged',
+      desc: `System auto-flagged — qty variance ${sample.difference || 'found'} · ${sample.receiveRemarks || 'Notified portal admin'}`,
+      time: formatTime(sample.actual7 || sample.receiveDate),
+      color: 'bg-rose-500'
+    });
+  } else {
+    events.push({
+      title: 'Store receiving',
+      desc: 'Awaiting delivery and store confirmation',
+      time: '—',
+      color: 'bg-slate-200'
+    });
+  }
+
+  return events;
+}
+
+// ─── Component ───────────────────────────────────────────────────────
+export const IMSDashboard = () => {
+  const [indents, setIndents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
+  const [selectedPO, setSelectedPO] = useState<string | null>(null);
+  const [selectedTimelineParty, setSelectedTimelineParty] = useState<string>('');
+
+  const currentUser = storageUtils.getCurrentUser();
+
+  // ── Fetch ─────────────────────────────────────────────────────────
+  const fetchIndents = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const googleSheetData = await indentService.getIndents();
+
+      const saved = localStorage.getItem('indent_approval_data');
+      const localData: any[] = saved ? JSON.parse(saved) : [];
+
+      const mergedData = googleSheetData.map((googleItem: any) => {
+        const localItem = localData.find((l: any) => l.id === googleItem.id);
+        return localItem ? { ...googleItem, ...localItem } : googleItem;
+      });
+
+      const userShopRaw = currentUser?.shopName || '';
+      const allowedShops =
+        userShopRaw && userShopRaw.toLowerCase() !== 'all'
+          ? userShopRaw.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+          : null;
+
+      const filtered = allowedShops
+        ? mergedData.filter((i: any) => allowedShops.includes((i.shopName || '').trim().toLowerCase()))
+        : mergedData;
+
+      setIndents(filtered);
+    } catch (err: any) {
+      console.error('Error fetching indents:', err);
+      setError('Failed to load data. Showing cached data.');
+      const saved = localStorage.getItem('indent_approval_data');
+      setIndents(saved ? JSON.parse(saved) : []);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchIndents(); }, [fetchIndents]);
+
+  // ── Group by IndentNumber (one PO = one row) ─────────────────────
+  const groupedPOs = useMemo((): GroupedPO[] => {
+    const map = new Map<string, any[]>();
+
+    indents.forEach((item) => {
+      const key = item.indentNumber || item.id || 'unknown';
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(item);
+    });
+
+    return Array.from(map.entries()).map(([indentNumber, items]) => {
+      const sample = items[0];
+      const totalQtyPcs = items.reduce((s: number, i: any) => s + Number(i.reorderQuantityPcs || 0), 0);
+      const totalQtyBox = items.reduce((s: number, i: any) => s + Number(i.reorderQuantityBox || 0), 0);
+      const { status, statusClass, lastEvent } = getStatusForPO(items);
+
+      return {
+        indentNumber,
+        partyName: sample.partyName || sample.traderName || '—',
+        shopName: sample.shopName || '—',
+        items,
+        totalQtyPcs,
+        totalQtyBox,
+        status,
+        statusClass,
+        lastEvent,
+        approvalDate: sample.approvalDate || '',
+        poNumber: sample.poNumber || '',
+      };
+    });
+  }, [indents]);
+
+  // Set default selected PO and Timeline Party if none is selected
+  useEffect(() => {
+    if (groupedPOs.length > 0 && !selectedPO) {
+      setSelectedPO(groupedPOs[0].indentNumber);
+    }
+  }, [groupedPOs, selectedPO]);
+
+  const uniqueParties = useMemo(() => {
+    const parties = new Set<string>();
+    indents.forEach(i => {
+      const p = i.partyName || i.traderName || '—';
+      if (p !== '—') parties.add(p);
+    });
+    return Array.from(parties).sort();
+  }, [indents]);
+
+  useEffect(() => {
+    if (uniqueParties.length > 0 && !selectedTimelineParty) {
+      setSelectedTimelineParty(uniqueParties[0]);
+    }
+  }, [uniqueParties, selectedTimelineParty]);
+
+  // ── Pipeline counts (from grouped POs) ───────────────────────────
+  const pipeline = useMemo(() => ({
+    generated: groupedPOs.length,
+    approved: groupedPOs.filter(p => ['Approved','PO Sent','Dispatched','In Transit','Accepted','Mismatch'].includes(p.status)).length,
+    dispatched: groupedPOs.filter(p => ['Dispatched','In Transit','Accepted','Mismatch'].includes(p.status)).length,
+    pickedUp: groupedPOs.filter(p => ['In Transit','Accepted','Mismatch'].includes(p.status)).length,
+    delivered: groupedPOs.filter(p => ['Accepted','Mismatch'].includes(p.status)).length,
+    accepted: groupedPOs.filter(p => p.status === 'Accepted').length,
+  }), [groupedPOs]);
+
+  // ── Top metrics ───────────────────────────────────────────────────
+  const metrics = useMemo(() => ({
+    totalPOs: groupedPOs.length,
+    pendingApproval: groupedPOs.filter(p => p.status === 'Generated').length,
+    inTransit: groupedPOs.filter(p => p.status === 'In Transit').length,
+    mismatches: groupedPOs.filter(p => p.status === 'Mismatch').length,
+  }), [groupedPOs]);
+
+  // ── Toggle expand ─────────────────────────────────────────────────
+  const toggleExpand = (indentNumber: string) => {
+    setExpandedPOs(prev => {
+      const next = new Set(prev);
+      next.has(indentNumber) ? next.delete(indentNumber) : next.add(indentNumber);
+      return next;
+    });
+  };
+
+  // ── Pipeline step label colour ────────────────────────────────────
+  const pipelineSteps = [
+    { label: 'Generated', subLabel: 'Indent raised', count: pipeline.generated },
+    { label: 'Approved',  subLabel: 'Purchase team',  count: pipeline.approved },
+    { label: 'Dispatched',subLabel: 'Trader',         count: pipeline.dispatched },
+    { label: 'Picked Up', subLabel: 'Transporter',    count: pipeline.pickedUp },
+    { label: 'Delivered', subLabel: 'Store manager',  count: pipeline.delivered },
+    { label: 'Accepted',  subLabel: 'Store confirmed',count: pipeline.accepted },
+  ];
+
+  // ─────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────
   return (
-    <div className="p-6 bg-white min-h-screen w-full lg:w-[calc(100vw-280px)]">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+    <div className="p-4 md:p-8 bg-[#f9fafb] min-h-screen w-full font-sans">
+
+      {/* ── Header ── */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">IMS Portal</h1>
-          <p className="text-gray-500 text-sm mt-1">18 Apr 2026 · Pune Distribution Hub</p>
+          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900">Purchase Dashboard</h1>
+          <p className="text-slate-500 text-sm mt-1 flex items-center gap-2">
+            {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+            <span className="text-slate-300">•</span>
+            {currentUser?.shopName && currentUser.shopName.toLowerCase() !== 'all'
+              ? currentUser.shopName
+              : 'All Shops'}
+          </p>
         </div>
-        <div className="flex items-center px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm font-medium border border-green-200">
-          <span className="w-2 h-2 rounded-full bg-green-500 mr-2"></span>
-          Live
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="border-b border-gray-200 mb-6 overflow-x-auto">
-        <nav className="flex space-x-8 min-w-max">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`pb-4 px-1 border-b-2 font-medium text-sm transition-colors whitespace-nowrap ${
-                activeTab === tab.id
-                  ? 'border-gray-900 text-gray-900'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-
-      {activeTab === 'dashboard' && (
-        <>
-          {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">Today's orders</h3>
-          <div className="text-3xl font-light text-gray-900 mb-2">12</div>
-          <p className="text-xs text-gray-500">PO-20260418-0001 to 0012</p>
-        </div>
-        <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">Pending approval</h3>
-          <div className="text-3xl font-light text-blue-600 mb-2">3</div>
-          <p className="text-xs text-gray-500">Awaiting purchasing team</p>
-        </div>
-        <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">In transit</h3>
-          <div className="text-3xl font-light text-purple-600 mb-2">5</div>
-          <p className="text-xs text-gray-500">Transporter on route</p>
-        </div>
-        <div className="bg-gray-50 rounded-xl p-5 border border-gray-100">
-          <h3 className="text-sm font-medium text-gray-500 mb-2">Mismatches today</h3>
-          <div className="text-3xl font-light text-red-600 mb-2">2</div>
-          <p className="text-xs text-gray-500">Qty variance logged</p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={fetchIndents}
+            className="flex items-center gap-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 px-4 py-2 rounded-xl hover:bg-slate-50 transition-all shadow-sm"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Refresh
+          </button>
+          <div className="flex items-center px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></span>
+            LIVE
+          </div>
         </div>
       </div>
 
-      {/* Order Pipeline */}
+      {/* ── Metric Cards ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        {[
+          { title: 'Total POs',       val: metrics.totalPOs,       sub: 'Active indent groups',         color: 'text-slate-900',   icon: ShoppingCart, bg: 'bg-slate-50',   border: 'border-slate-100' },
+          { title: 'Pending Approval',val: metrics.pendingApproval,sub: 'Awaiting purchase team',        color: 'text-blue-600',    icon: Clock,        bg: 'bg-blue-50',    border: 'border-blue-100' },
+          { title: 'In Transit',      val: metrics.inTransit,      sub: 'Picked up by transporter',     color: 'text-indigo-600',  icon: Truck,        bg: 'bg-indigo-50',  border: 'border-indigo-100' },
+          { title: 'Mismatches',      val: metrics.mismatches,     sub: 'Qty discrepancy flagged',       color: 'text-rose-600',    icon: AlertTriangle,bg: 'bg-rose-50',    border: 'border-rose-100' },
+        ].map((c, i) => (
+          <div key={i} className={`${c.bg} border ${c.border} rounded-2xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5`}>
+            <div className="flex justify-between items-start mb-3">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{c.title}</p>
+              <c.icon className={`w-4 h-4 ${c.color}`} strokeWidth={1.5} />
+            </div>
+            <div className={`text-3xl font-light ${c.color} mb-1`}>{c.val}</div>
+            <p className="text-[11px] text-slate-400">{c.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Order Pipeline ── */}
       <div className="mb-8">
-        <h2 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase">Order Pipeline · Today</h2>
-        <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
-          <div className="flex flex-col md:flex-row">
-            {pipelineSteps.map((step, index) => (
-              <div key={step.id} className={`flex-1 p-4 relative ${index !== pipelineSteps.length - 1 ? 'border-b md:border-b-0 md:border-r border-gray-200' : ''}`}>
-                <div className="text-xs text-gray-500 mb-1">{step.label}</div>
-                <div className="text-2xl font-light text-gray-900 mb-1">{step.count}</div>
-                <div className="text-xs text-gray-400">{step.subLabel}</div>
-                
-                {/* Arrow pointing right (hidden on mobile) */}
-                {index !== pipelineSteps.length - 1 && (
-                  <div className="hidden md:block absolute -right-3 top-1/2 transform -translate-y-1/2 z-10 text-gray-300">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="9 18 15 12 9 6"></polyline>
-                    </svg>
+        <h2 className="text-[11px] font-bold text-slate-400 tracking-[0.15em] uppercase mb-4">Order Pipeline · Today</h2>
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
+            {pipelineSteps.map((step, i) => (
+              <div key={i} className="flex-1 p-4 relative group hover:bg-slate-50 transition-colors">
+                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{step.label}</div>
+                <div className="text-2xl font-light text-slate-900 mb-0.5">{loading ? '—' : step.count}</div>
+                <div className="text-[11px] text-slate-400">{step.subLabel}</div>
+                {i < pipelineSteps.length - 1 && (
+                  <div className="hidden lg:block absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 bg-white border border-slate-100 rounded-full p-0.5">
+                    <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
                   </div>
                 )}
               </div>
@@ -118,170 +351,285 @@ export const IMSDashboard = () => {
         </div>
       </div>
 
-      {/* Live Orders Table */}
+      {/* ── Live Orders — Grouped by PO ── */}
       <div>
-        <h2 className="text-xs font-bold text-gray-500 tracking-wider mb-4 uppercase">Live Orders</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-gray-200 text-gray-500">
-                <th className="pb-3 font-medium px-2">PO Number</th>
-                <th className="pb-3 font-medium px-2">Party</th>
-                <th className="pb-3 font-medium px-2">Items</th>
-                <th className="pb-3 font-medium px-2">Total Qty</th>
-                <th className="pb-3 font-medium px-2">Status</th>
-                <th className="pb-3 font-medium px-2">Last event</th>
-              </tr>
-            </thead>
-            <tbody className="text-gray-700">
-              {liveOrders.map((order, idx) => (
-                <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                  <td className="py-4 px-2 font-mono text-gray-900">{order.po}</td>
-                  <td className="py-4 px-2 font-medium">{order.party}</td>
-                  <td className="py-4 px-2">{order.items}</td>
-                  <td className="py-4 px-2 font-mono text-gray-600">{order.qty}</td>
-                  <td className="py-4 px-2">
-                    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${order.statusColor}`}>
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="py-4 px-2 text-gray-500 text-xs">{order.event}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-[11px] font-bold text-slate-400 tracking-[0.15em] uppercase">
+            Live Orders ({loading ? '…' : groupedPOs.length} POs)
+          </h2>
+          {!loading && (
+            <span className="text-[11px] text-slate-400">
+              Click a row to see items
+            </span>
+          )}
         </div>
+
+        {/* Loading */}
+        {loading && (
+          <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-slate-100">
+            <div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-slate-800 animate-spin"></div>
+          </div>
+        )}
+
+        {/* Error */}
+        {!loading && error && (
+          <div className="flex items-center gap-3 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-700 text-sm mb-4">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            {error}
+          </div>
+        )}
+
+        {/* Empty */}
+        {!loading && groupedPOs.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-48 bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400">
+            <Package className="w-10 h-10 mb-2" strokeWidth={1} />
+            <p className="text-sm font-medium">No orders found</p>
+          </div>
+        )}
+
+        {/* Table */}
+        {!loading && groupedPOs.length > 0 && (
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            {/* Header */}
+            <div className="grid grid-cols-[1fr_1.5fr_auto_1fr_1fr_1fr] gap-x-4 px-5 py-3 bg-slate-50 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wide">
+              <div>Indent No.</div>
+              <div>Party</div>
+              <div className="text-center">Items</div>
+              <div>Total Qty</div>
+              <div>Status</div>
+              <div>Last Event</div>
+            </div>
+
+            {/* Rows */}
+            <div className="divide-y divide-slate-50">
+              {groupedPOs.map((po) => {
+                const isOpen = expandedPOs.has(po.indentNumber);
+
+                // Group items by party within this PO (usually same party, but handle multiple)
+                const byParty = po.items.reduce((acc: Record<string, any[]>, item: any) => {
+                  const p = item.partyName || item.traderName || '—';
+                  if (!acc[p]) acc[p] = [];
+                  acc[p].push(item);
+                  return acc;
+                }, {});
+
+                return (
+                  <div key={po.indentNumber}>
+                    {/* PO Row */}
+                    <button
+                      onClick={() => {
+                        toggleExpand(po.indentNumber);
+                        setSelectedPO(po.indentNumber);
+                      }}
+                      className={`w-full grid grid-cols-[1fr_1.5fr_auto_1fr_1fr_1fr] gap-x-4 px-5 py-4 text-left hover:bg-slate-50/70 transition-colors group ${
+                        selectedPO === po.indentNumber ? 'bg-slate-50/70 ring-1 ring-inset ring-slate-200' : ''
+                      }`}
+                    >
+                      {/* Indent No */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`transition-transform flex-shrink-0 ${isOpen ? 'rotate-90' : ''}`}>
+                          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500" />
+                        </span>
+                        <span className="font-mono text-sm font-medium text-slate-800 truncate">
+                          {po.indentNumber}
+                        </span>
+                      </div>
+
+                      {/* Party */}
+                      <div className="font-semibold text-sm text-slate-700 truncate self-center">
+                        {po.partyName}
+                      </div>
+
+                      {/* Items count */}
+                      <div className="text-center self-center">
+                        <span className="inline-block min-w-[28px] text-center bg-slate-100 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">
+                          {po.items.length}
+                        </span>
+                      </div>
+
+                      {/* Qty */}
+                      <div className="self-center">
+                        <span className="text-sm font-mono text-slate-700">
+                          {po.totalQtyBox > 0
+                            ? `${po.totalQtyBox} Box`
+                            : `${po.totalQtyPcs} Pcs`}
+                        </span>
+                        {po.totalQtyBox > 0 && po.totalQtyPcs > 0 && (
+                          <span className="text-[11px] text-slate-400 ml-1">({po.totalQtyPcs} pcs)</span>
+                        )}
+                      </div>
+
+                      {/* Status */}
+                      <div className="self-center">
+                        <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${po.statusClass}`}>
+                          {po.status}
+                        </span>
+                      </div>
+
+                      {/* Last Event */}
+                      <div className="self-center text-xs text-slate-400 truncate">
+                        {po.lastEvent || '—'}
+                      </div>
+                    </button>
+
+                    {/* ── Expanded: Items grouped by Party ── */}
+                    {isOpen && (
+                      <div className="bg-slate-50/50 border-t border-slate-100 px-5 pb-4 pt-3">
+                        {Object.entries(byParty).map(([partyName, partyItems]: [string, any[]]) => (
+                          <div key={partyName} className="mb-4 last:mb-0">
+                            {/* Party Header */}
+                            <div className="flex items-center gap-2 mb-2">
+                              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
+                              <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">
+                                {partyName}
+                              </span>
+                              <span className="text-[11px] text-slate-400">
+                                · {partyItems.length} item{partyItems.length !== 1 ? 's' : ''}
+                              </span>
+                            </div>
+
+                            {/* Items Table */}
+                            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
+                              <table className="w-full text-left text-xs">
+                                <thead>
+                                  <tr className="bg-slate-50 text-slate-400 font-semibold border-b border-slate-100">
+                                    <th className="px-4 py-2.5">Item Name</th>
+                                    <th className="px-4 py-2.5">Brand</th>
+                                    <th className="px-4 py-2.5 text-center">Size</th>
+                                    <th className="px-4 py-2.5 text-center">Qty (Pcs)</th>
+                                    <th className="px-4 py-2.5 text-center">Qty (Box)</th>
+                                    <th className="px-4 py-2.5 text-center">Closing Stock</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                  {(partyItems as any[]).map((item: any, idx: number) => (
+                                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                                      <td className="px-4 py-2.5 font-medium text-slate-800 max-w-[200px] truncate">
+                                        {item.itemName || item.brandName || '—'}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-slate-500">
+                                        {item.brandName || '—'}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-center text-slate-500">
+                                        {item.sizeML ? `${item.sizeML} ml` : item.size || '—'}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-center font-mono font-semibold text-slate-700">
+                                        {item.reorderQuantityPcs || 0}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-center font-mono text-slate-500">
+                                        {item.reorderQuantityBox || '—'}
+                                      </td>
+                                      <td className="px-4 py-2.5 text-center">
+                                        <span className={`font-mono text-xs ${
+                                          Number(item.closingStockBottle || item.closingStock || 0) <= Number(item.moq || 0)
+                                            ? 'text-rose-600 font-bold'
+                                            : 'text-slate-500'
+                                        }`}>
+                                          {item.closingStockBottle || item.closingStock || 0}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                                {/* Party subtotal */}
+                                <tfoot>
+                                  <tr className="bg-slate-50 border-t border-slate-100">
+                                    <td colSpan={3} className="px-4 py-2 text-[11px] font-bold text-slate-400 uppercase">
+                                      Party Total
+                                    </td>
+                                    <td className="px-4 py-2 text-center font-mono font-bold text-slate-700 text-xs">
+                                      {(partyItems as any[]).reduce((s: number, i: any) => s + Number(i.reorderQuantityPcs || 0), 0)}
+                                    </td>
+                                    <td className="px-4 py-2 text-center font-mono font-bold text-slate-700 text-xs">
+                                      {(partyItems as any[]).reduce((s: number, i: any) => s + Number(i.reorderQuantityBox || 0), 0) || '—'}
+                                    </td>
+                                    <td></td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
-        </>
-      )}
 
-      {/* TRADER MODULE */}
-      {activeTab === 'trader-module' && (
-        <div className="max-w-2xl bg-gray-50 border border-gray-200 rounded-xl p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Trader Confirmation</h2>
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Select Order to Confirm</label>
-            <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-              <option>PO-20260418-0004 - Wine Enterprises</option>
-              <option>PO-20260418-0005 - XYZ Trader</option>
-            </select>
-          </div>
-          <div className="mb-6">
-            <p className="text-sm font-medium text-gray-700 mb-3">Did you accept the order?</p>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-green-50">
-                <input type="radio" name="trader_accept" value="Yes" className="w-4 h-4 text-green-600" />
-                <span className="text-gray-900 font-medium">Yes, Accepted</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-red-50">
-                <input type="radio" name="trader_accept" value="No" className="w-4 h-4 text-red-600" />
-                <span className="text-gray-900 font-medium">No, Rejected</span>
-              </label>
-            </div>
-          </div>
-          <button 
-            onClick={() => handleActionSubmit('Trader', { status: 'Accepted' })}
-            className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition-colors"
-          >
-            Submit Response
-          </button>
-        </div>
-      )}
-
-      {/* TRANSPORTER MODULE */}
-      {activeTab === 'transporter-module' && (
-        <div className="max-w-2xl bg-gray-50 border border-gray-200 rounded-xl p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Transporter Pickup Status</h2>
-          <div className="mb-6">
-            <label className="block text-sm font-medium text-gray-700 mb-2">Select Assigned Order</label>
-            <select className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-              <option>PO-20260418-0003 - Millinnium Spirits</option>
-            </select>
-          </div>
-          <div className="mb-6">
-            <p className="text-sm font-medium text-gray-700 mb-3">Order Pickup Status</p>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-blue-50">
-                <input type="radio" name="transporter_pickup" value="Pickup" className="w-4 h-4 text-blue-600" />
-                <span className="text-gray-900 font-medium">Picked Up</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-orange-50">
-                <input type="radio" name="transporter_pickup" value="Not Pickup" className="w-4 h-4 text-orange-600" />
-                <span className="text-gray-900 font-medium">Not Picked Up</span>
-              </label>
-            </div>
-          </div>
-          <button 
-            onClick={() => handleActionSubmit('Transporter', { status: 'Picked Up' })}
-            className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition-colors"
-          >
-            Update Status
-          </button>
-        </div>
-      )}
-
-      {/* STORE MODULE */}
-      {activeTab === 'store-module' && (
-        <div className="max-w-4xl bg-gray-50 border border-gray-200 rounded-xl p-6">
-          <h2 className="text-xl font-bold text-gray-900 mb-6">Store Receiving Module</h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Order Received?</label>
-              <div className="flex gap-4">
-                <label className="flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-green-50">
-                  <input type="radio" name="store_receive" value="Yes" defaultChecked className="w-4 h-4 text-green-600" />
-                  <span className="text-gray-900 font-medium">Yes</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer bg-white border border-gray-300 px-4 py-2 rounded-lg hover:bg-red-50">
-                  <input type="radio" name="store_receive" value="No" className="w-4 h-4 text-red-600" />
-                  <span className="text-gray-900 font-medium">No</span>
-                </label>
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Receiver Name</label>
-              <input type="text" placeholder="Enter full name" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+      {/* ── Dynamic Event Timeline at Bottom ── */}
+      {!loading && indents.length > 0 && (
+        <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+            <h2 className="text-[11px] font-bold text-slate-400 tracking-[0.15em] uppercase">
+              EVENT TIMELINES BY PARTY
+            </h2>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-slate-500 uppercase">Select Party:</label>
+              <select 
+                value={selectedTimelineParty}
+                onChange={(e) => setSelectedTimelineParty(e.target.value)}
+                className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block px-3 py-1.5 shadow-sm font-medium outline-none"
+              >
+                {uniqueParties.map((party) => (
+                  <option key={party} value={party}>{party}</option>
+                ))}
+              </select>
             </div>
           </div>
 
-          <div className="mb-6 bg-white border border-gray-200 rounded-lg overflow-hidden">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-gray-100 text-gray-600">
-                <tr>
-                  <th className="px-4 py-3 font-medium">Item Name</th>
-                  <th className="px-4 py-3 font-medium text-center">Order Qty</th>
-                  <th className="px-4 py-3 font-medium text-center">Closing Stock</th>
-                  <th className="px-4 py-3 font-medium w-32">Received Qty</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                <tr>
-                  <td className="px-4 py-3 font-medium text-gray-900">Black Dog Centenary Black Reserve</td>
-                  <td className="px-4 py-3 text-center text-gray-600">50</td>
-                  <td className="px-4 py-3 text-center text-blue-600 font-medium">12</td>
-                  <td className="px-4 py-3">
-                    <input type="number" defaultValue={50} className="w-full px-3 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none" />
-                  </td>
-                </tr>
-                <tr>
-                  <td className="px-4 py-3 font-medium text-gray-900">Old Monk Supreme XXX Rum</td>
-                  <td className="px-4 py-3 text-center text-gray-600">120</td>
-                  <td className="px-4 py-3 text-center text-blue-600 font-medium">45</td>
-                  <td className="px-4 py-3">
-                    <input type="number" defaultValue={120} className="w-full px-3 py-1.5 border border-gray-300 rounded focus:ring-1 focus:ring-blue-500 outline-none" />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {(() => {
+              // Find all indents for the selected party
+              const partyIndents = indents.filter(i => (i.partyName || i.traderName) === selectedTimelineParty);
+              
+              // Group these indents by PO Number
+              const posForParty = partyIndents.reduce((acc: Record<string, any[]>, item: any) => {
+                const poNum = item.indentNumber || item.poNumber || 'Unknown PO';
+                if (!acc[poNum]) acc[poNum] = [];
+                acc[poNum].push(item);
+                return acc;
+              }, {});
 
-          <button 
-            onClick={() => handleActionSubmit('Store', { received: true, items: 2 })}
-            className="w-full bg-gray-900 text-white py-3 rounded-lg font-medium hover:bg-gray-800 transition-colors"
-          >
-            Save Receiving Data
-          </button>
+              if (Object.keys(posForParty).length === 0) {
+                return (
+                  <div className="col-span-full bg-white rounded-2xl border border-dashed border-slate-200 p-8 text-center text-slate-400">
+                    No active timelines found for {selectedTimelineParty}.
+                  </div>
+                );
+              }
+
+              return Object.entries(posForParty).map(([poNumber, items]) => (
+                <div key={poNumber} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
+                  <div className="flex items-center gap-2 mb-6">
+                    <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
+                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{poNumber}</h3>
+                    <span className="text-xs text-slate-400 ml-auto bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                      {(items as any[]).length} items
+                    </span>
+                  </div>
+                  
+                  <div className="relative border-l border-slate-200 ml-3 space-y-6">
+                    {generateTimeline(items as any[]).map((ev, idx) => (
+                      <div key={idx} className="relative pl-6 group">
+                        <div className={`absolute w-3 h-3 ${ev.color} rounded-full -left-[6.5px] top-1.5 ring-4 ring-white shadow-sm transition-transform group-hover:scale-125`}></div>
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
+                          <div>
+                            <h3 className="text-sm font-bold text-slate-900">{ev.title}</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">{ev.desc}</p>
+                          </div>
+                          <div className="text-[11px] font-mono text-slate-400 font-medium bg-slate-50 px-2 py-0.5 rounded-md mt-1 sm:mt-0">{ev.time}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
         </div>
       )}
 
