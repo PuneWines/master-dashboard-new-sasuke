@@ -404,11 +404,11 @@ const Advance = () => {
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-8 py-8 border-b border-gray-100 flex items-center justify-between bg-indigo-600 text-white">
-              <div className="flex items-center gap-4">
-                <div className="p-3 bg-white/20 rounded-2xl">
-                  <Plus size={24} />
+          <div className="bg-white rounded-[2.2rem] shadow-2xl w-full max-w-[520px] max-h-[92vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-7 py-5 border-b border-gray-100 flex items-center justify-between bg-indigo-600 text-white">
+              <div className="flex items-center gap-3.5">
+                <div className="p-2.5 bg-white/20 rounded-xl">
+                  <Plus size={22} />
                 </div>
                 <h2 className="text-xl font-black tracking-tight">New Request</h2>
               </div>
@@ -416,16 +416,16 @@ const Advance = () => {
                 onClick={() => setShowModal(false)}
                 className="p-2 hover:bg-white/10 rounded-full transition-colors"
               >
-                <X size={24} />
+                <X size={22} />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-8 space-y-6">
+            <form onSubmit={handleSubmit} className="p-7 space-y-5 overflow-y-auto flex-1">
               {user?.Admin === 'Yes' && (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Select Employee</label>
                   <select
-                    className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-medium text-gray-700 appearance-none"
+                    className="w-full px-5 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-medium text-sm text-gray-700 appearance-none"
                     value={formData.selectedEmployeeId}
                     onChange={(e) => {
                       const emp = employees.find(emp => emp.id === e.target.value);
@@ -445,28 +445,28 @@ const Advance = () => {
                 </div>
               )}
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Select Category</label>
-                <div className="grid grid-cols-1 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   {[
-                    { id: 'Advance', icon: Banknote, color: 'text-emerald-500' },
+                    { id: 'Fixed Advance', icon: Banknote, color: 'text-emerald-500' },
                     { id: 'Extra Advance', icon: Plus, color: 'text-indigo-500' },
                     { id: 'Brackage', icon: Hammer, color: 'text-orange-500' },
                     { id: 'Medical Amount', icon: Stethoscope, color: 'text-blue-500' }
                   ].map((item) => (
                     <label 
                       key={item.id}
-                      className={`flex items-center justify-between p-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                      className={`flex items-center justify-between p-3.5 px-4 rounded-2xl border-2 transition-all cursor-pointer ${
                         formData.type === item.id 
                           ? 'border-indigo-600 bg-indigo-50/50' 
                           : 'border-gray-100 hover:border-gray-200 bg-gray-50/30'
                       }`}
                     >
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2.5">
                         <div className={`p-2 rounded-xl bg-white shadow-sm ${item.color}`}>
-                          <item.icon size={20} />
+                          <item.icon size={18} />
                         </div>
-                        <span className="font-black text-gray-900">{item.id}</span>
+                        <span className="font-black text-xs text-gray-900">{item.id}</span>
                       </div>
                       <input 
                         type="radio" 
@@ -476,7 +476,7 @@ const Advance = () => {
                         onChange={(e) => setFormData({...formData, type: e.target.value})}
                         className="hidden"
                       />
-                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${formData.type === item.id ? 'border-indigo-600' : 'border-gray-300'}`}>
+                      <div className={`w-4.5 h-4.5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${formData.type === item.id ? 'border-indigo-600' : 'border-gray-300'}`}>
                         {formData.type === item.id && <div className="w-2.5 h-2.5 rounded-full bg-indigo-600"></div>}
                       </div>
                     </label>
@@ -484,44 +484,44 @@ const Advance = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
                   <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Request Amount (₹)</label>
                   <div className="relative">
                     <input 
                       type="number" 
                       placeholder="0.00"
-                      className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-black text-gray-900 text-xl"
+                      className="w-full px-5 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-black text-gray-900 text-lg"
                       value={formData.amount}
                       onChange={(e) => setFormData({...formData, amount: e.target.value})}
                       required
                     />
-                    <div className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-300 font-black text-xl">₹</div>
+                    <div className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-300 font-black text-lg">₹</div>
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Monthly Deduction (₹)</label>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Deduction (₹/mo)</label>
                   <div className="relative">
                     <input 
                       type="number" 
                       placeholder="0.00"
-                      className="w-full px-6 py-4 bg-rose-50/30 border-none rounded-2xl focus:ring-2 focus:ring-rose-500 font-black text-rose-700 text-xl"
+                      className="w-full px-5 py-3 bg-rose-50/30 border-none rounded-2xl focus:ring-2 focus:ring-rose-500 font-black text-rose-700 text-lg"
                       value={formData.monthlyDeduction}
                       onChange={(e) => setFormData({...formData, monthlyDeduction: e.target.value})}
                       required
                     />
-                    <div className="absolute right-6 top-1/2 -translate-y-1/2 text-rose-200 font-black text-xl">₹</div>
+                    <div className="absolute right-5 top-1/2 -translate-y-1/2 text-rose-200 font-black text-lg">₹</div>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Reason / Explanation</label>
                 <textarea 
-                  rows={3}
+                  rows={2}
                   placeholder="Tell us why you need this..."
-                  className="w-full px-6 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-medium text-gray-700"
+                  className="w-full px-5 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-medium text-sm text-gray-700"
                   value={formData.reason}
                   onChange={(e) => setFormData({...formData, reason: e.target.value})}
                   required
@@ -531,12 +531,12 @@ const Advance = () => {
               <button 
                 type="submit"
                 disabled={submitting}
-                className="w-full py-5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-[2rem] shadow-xl shadow-indigo-100 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-3"
+                className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-xl shadow-indigo-100 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2.5 text-base mt-2"
               >
                 {submitting ? (
-                  <><Loader2 className="animate-spin" size={24} /> Processing...</>
+                  <><Loader2 className="animate-spin" size={20} /> Processing...</>
                 ) : (
-                  <><CheckCircle2 size={24} /> Confirm Request</>
+                  <><CheckCircle2 size={20} /> Confirm Request</>
                 )}
               </button>
             </form>

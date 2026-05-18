@@ -29,15 +29,15 @@ export const TraderVerification: React.FC = () => {
 
   const filteredIndents = useMemo(() => {
     return indents.filter(item => {
-      // Visibility Condition: Planned 4 and Actual 4 must be NOT NULL
-      const isVisible = hasValue(item.planned4) && hasValue(item.actual4);
+      // Visibility Condition: Planned 4 (col-AI) must be NOT NULL
+      const isVisible = hasValue(item.planned4);
       if (!isVisible) return false;
 
-      // History Condition: Shift to history if Trader Status is "Yes"
-      const isHistory = String(item.traderStatus || "").trim().toLowerCase() === "yes";
+      // Classify based on whether Actual 4 (col-AJ) has a value
+      const hasActual4 = hasValue(item.actual4);
       
-      if (activeTab === 'pending' && isHistory) return false;
-      if (activeTab === 'history' && !isHistory) return false;
+      if (activeTab === 'pending' && hasActual4) return false;
+      if (activeTab === 'history' && !hasActual4) return false;
 
       const searchLower = searchTerm.toLowerCase();
       return (

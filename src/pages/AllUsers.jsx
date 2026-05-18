@@ -399,32 +399,30 @@ const HomePage = () => {
                 fileToProcess = await compressImage(file);
             }
 
-            const reader = new FileReader();
             const base64Data = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
                 reader.onload = () => {
                     // Remove the data URL prefix (e.g., "data:image/jpeg;base64,")
-                    const base64 = reader.result.split(',')[1];
+                    const base64 = reader.result.includes(',') ? reader.result.split(',')[1] : reader.result;
                     resolve(base64);
                 };
                 reader.onerror = reject;
                 reader.readAsDataURL(fileToProcess);
             });
 
-            const payload = {
-                action: 'uploadFile',
-                sheetName: 'Master Login',
-                base64Data: base64Data, // Our React code already strips the prefix
-                fileName: `admin_avatar_${Date.now()}.jpg`,
-                mimeType: 'image/jpeg',
-                folderId: '145FIQRxwN_omuW2XPHx-Bbk8kFOpzosd'
-            };
+            const uploadFormData = new FormData();
+            uploadFormData.append('action', 'uploadFile');
+            uploadFormData.append('sheetName', 'Master Login');
+            uploadFormData.append('base64Data', base64Data);
+            uploadFormData.append('fileName', `admin_avatar_${Date.now()}.jpg`);
+            uploadFormData.append('mimeType', 'image/jpeg');
+            uploadFormData.append('folderId', '145FIQRxwN_omuW2XPHx-Bbk8kFOpzosd');
 
-            console.log('Uploading to MASTER_LOGIN:', SCRIPT_URLS.MASTER_LOGIN);
+            console.log('Uploading using FormData to MASTER_LOGIN:', SCRIPT_URLS.MASTER_LOGIN);
             
             const response = await fetch(SCRIPT_URLS.MASTER_LOGIN, {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain' },
-                body: JSON.stringify(payload),
+                body: uploadFormData,
             });
 
             const data = await response.json();
@@ -434,9 +432,15 @@ const HomePage = () => {
 
             let finalUrl = data.fileUrl;
             if (finalUrl && typeof finalUrl === 'object') finalUrl = finalUrl.fileUrl || finalUrl;
-            else if (finalUrl && typeof finalUrl === 'string' && finalUrl.startsWith('{') && finalUrl.includes('fileUrl=')) {
-                const match = finalUrl.match(/fileUrl=([^,}]+)/);
-                if (match && match[1]) finalUrl = match[1].trim();
+            
+            if (finalUrl && typeof finalUrl === 'string') {
+                if (finalUrl.startsWith('{') && finalUrl.includes('fileUrl=')) {
+                    const match = finalUrl.match(/fileUrl=([^,}]+)/);
+                    if (match && match[1]) finalUrl = match[1].trim();
+                }
+                if (finalUrl.startsWith('{') && finalUrl.endsWith('}')) {
+                    finalUrl = finalUrl.slice(1, -1);
+                }
             }
 
             console.log('Final URL:', finalUrl);
@@ -454,20 +458,18 @@ const HomePage = () => {
         try {
             console.log('Updating sheet with URL:', photoUrl);
 
-            const params = new URLSearchParams();
-            params.append('sheetName', 'Master Login');
-            params.append('action', 'updateCell');
-            params.append('rowIndex', '2');
-            params.append('columnIndex', '12');
-            params.append('value', photoUrl);
+            const formData = new FormData();
+            formData.append('sheetName', 'Master Login');
+            formData.append('action', 'updateCell');
+            formData.append('rowIndex', '2');
+            formData.append('columnIndex', '14'); // Target Column N
+            formData.append('value', photoUrl);
 
             console.log('Updating sheet via:', SCRIPT_URLS.MASTER_LOGIN);
-            console.log('Update params:', Object.fromEntries(params));
 
             const response = await fetch(SCRIPT_URLS.MASTER_LOGIN, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                body: params.toString(),
+                body: formData,
             });
 
             const data = await response.json();
@@ -512,8 +514,8 @@ const HomePage = () => {
             // Update Master Sheet with photo URL
             await updateMasterSheetPhoto(photoUrl);
 
-            // Update local state
-            setAdminPhotoUrl(photoUrl);
+            // Update local state with direct display link
+            setAdminPhotoUrl(getDirectDriveLink(photoUrl));
 
             console.log('Upload complete!');
             toast.success('Admin avatar updated successfully!');
@@ -535,9 +537,9 @@ const HomePage = () => {
                 console.log('MASTER sheet data:', result);
 
                 if (result.success && result.data && result.data.length > 1) {
-                    // Row 2 (index 1), Column L (index 11 in 0-based array)
-                    const photoUrl = result.data[1][11];
-                    console.log('Photo URL from sheet (Column L):', photoUrl);
+                    // Row 2 (index 1), Column N (index 13 in 0-based array)
+                    const photoUrl = result.data[1][13];
+                    console.log('Photo URL from sheet (Column N):', photoUrl);
 
                     if (photoUrl && photoUrl !== '-' && photoUrl !== '') {
                         // Convert Google Drive link to direct display link
@@ -844,25 +846,33 @@ const HomePage = () => {
                                         const raw = adminData.data;
                                         // Header is usually row 0
                                         const headers = raw[0] || [];
-                                        const photoIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'admin photo');
+                                        const photoIdx = headers.findIndex(h => {
+                                            const normalized = h?.toString().toLowerCase().trim();
+                                            return normalized === 'photo' || normalized === 'admin photo' || normalized === 'admin_photo' || normalized === 'candidate photo';
+                                        });
                                         const idIdx = headers.findIndex(h => h && h.toString().toLowerCase().trim() === 'emp id');
                                         
-                                        if (photoIdx !== -1 && idIdx !== -1) {
+                                        const finalPhotoIdx = photoIdx !== -1 ? photoIdx : 13; // Fallback to column N (index 13)
+                                        if (idIdx !== -1) {
                                             const adminRow = raw.slice(1).find(r => normalizeId(r[idIdx]) === normalizeId(storedEmpId));
-                                            if (adminRow && adminRow[photoIdx]) {
-                                                console.log("HomePage - Admin Photo URL found in Master Login sheet:", adminRow[photoIdx]);
-                                                candidatePhoto = getDirectDriveLink(adminRow[photoIdx].toString().trim());
+                                            if (adminRow && adminRow[finalPhotoIdx]) {
+                                                console.log("HomePage - Admin Photo URL found in Master Login sheet:", adminRow[finalPhotoIdx]);
+                                                candidatePhoto = getDirectDriveLink(adminRow[finalPhotoIdx].toString().trim());
                                             }
                                         } else {
                                             // Maybe there's a header at row 1 instead
                                             const headers2 = raw[1] || [];
-                                            const photoIdx2 = headers2.findIndex(h => h && h.toString().toLowerCase().trim() === 'admin photo');
+                                            const photoIdx2 = headers2.findIndex(h => {
+                                                const normalized = h?.toString().toLowerCase().trim();
+                                                return normalized === 'photo' || normalized === 'admin photo' || normalized === 'admin_photo' || normalized === 'candidate photo';
+                                            });
                                             const idIdx2 = headers2.findIndex(h => h && h.toString().toLowerCase().trim() === 'emp id');
-                                            if (photoIdx2 !== -1 && idIdx2 !== -1) {
+                                            const finalPhotoIdx2 = photoIdx2 !== -1 ? photoIdx2 : 13; // Fallback to column N (index 13)
+                                            if (idIdx2 !== -1) {
                                                 const adminRow = raw.slice(2).find(r => normalizeId(r[idIdx2]) === normalizeId(storedEmpId));
-                                                if (adminRow && adminRow[photoIdx2]) {
-                                                    console.log("HomePage - Admin Photo URL found in Master Login sheet:", adminRow[photoIdx2]);
-                                                    candidatePhoto = getDirectDriveLink(adminRow[photoIdx2].toString().trim());
+                                                if (adminRow && adminRow[finalPhotoIdx2]) {
+                                                    console.log("HomePage - Admin Photo URL found in Master Login sheet:", adminRow[finalPhotoIdx2]);
+                                                    candidatePhoto = getDirectDriveLink(adminRow[finalPhotoIdx2].toString().trim());
                                                 }
                                             }
                                         }
@@ -1086,8 +1096,10 @@ const HomePage = () => {
                                                                     : "/user.png"
                                                     }
                                                     alt="Employee"
+                                                    referrerPolicy="no-referrer"
                                                     className="w-full h-full rounded-full object-cover"
                                                     onError={(e) => {
+                                                        e.target.onerror = null;
                                                         e.target.src = userDetails?.employee_id
                                                             ? `/employees/${userDetails.employee_id}.jpg`
                                                             : "/user.png";
