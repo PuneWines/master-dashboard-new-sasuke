@@ -1035,7 +1035,9 @@ export const indentService: IndentService = {
         // Recalculate start offset if possible.
         // For now, allow mapItem to accept a 3rd arg if we can pass it.
         // Re-defining mapItem behavior:
-        const mapped = rows.map((r, i) => mapItem(r, i, (headerRowIdx_SCOPED > 0 ? headerRowIdx_SCOPED : 0) + i + 2));
+        const mapped = rows
+          .map((r, i) => mapItem(r, i, (headerRowIdx_SCOPED > 0 ? headerRowIdx_SCOPED : 0) + i + 2))
+          .filter((item) => item.indentNumber && item.indentNumber.trim() !== "");
         const t3 = performance.now();
         console.log(
           "map_ms:",

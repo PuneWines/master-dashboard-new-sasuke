@@ -13,6 +13,11 @@ import {
   TrendingUp,
   Clock,
   ShoppingCart,
+  Search,
+  Filter,
+  X,
+  AlertCircle,
+  TrendingDown
 } from 'lucide-react';
 import { indentService } from '../../services/purchase_management/indentService';
 import { storageUtils } from '../../utils/purchase_management/storage';
@@ -34,14 +39,13 @@ interface GroupedPO {
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 function getStatusForPO(items: any[]): { status: string; statusClass: string; lastEvent: string } {
-  // Use the first item's status fields (they share same PO status)
   const sample = items[0] || {};
 
   if (sample.receiveStatus === 'All Okay') {
-    return { status: 'Accepted', statusClass: 'bg-emerald-50 text-emerald-700 border border-emerald-100', lastEvent: sample.approvalDate || '' };
+    return { status: 'Accepted', statusClass: 'bg-emerald-50 text-emerald-700 border border-emerald-100/80', lastEvent: sample.approvalDate || '' };
   }
   if (sample.receiveStatus === 'Not Okay' || (sample.difference && Number(sample.difference) !== 0)) {
-    return { status: 'Mismatch', statusClass: 'bg-rose-50 text-rose-700 border border-rose-100', lastEvent: sample.approvalDate || '' };
+    return { status: 'Mismatch', statusClass: 'bg-rose-50 text-rose-700 border border-rose-100 animate-pulse-subtle', lastEvent: sample.approvalDate || '' };
   }
   if (String(sample.transporterStatus || '').trim().toLowerCase() === 'pickup') {
     return { status: 'In Transit', statusClass: 'bg-indigo-50 text-indigo-700 border border-indigo-100', lastEvent: sample.dispatchDate || '' };
@@ -69,7 +73,7 @@ function generateTimeline(items: any[]) {
       const timeParts = parts[parts.length - 1].split(':');
       return `${timeParts[0]}:${timeParts[1] || '00'}`;
     }
-    return ts; // fallback if just a date or simple string
+    return ts;
   };
 
   // 1. Generated
@@ -146,6 +150,10 @@ export const IMSDashboard = () => {
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
   const [selectedPO, setSelectedPO] = useState<string | null>(null);
   const [selectedTimelineParty, setSelectedTimelineParty] = useState<string>('');
+  
+  // Custom filters
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
 
   const currentUser = storageUtils.getCurrentUser();
 
@@ -156,13 +164,8 @@ export const IMSDashboard = () => {
       setError(null);
       const googleSheetData = await indentService.getIndents();
 
-      const saved = localStorage.getItem('indent_approval_data');
-      const localData: any[] = saved ? JSON.parse(saved) : [];
-
-      const mergedData = googleSheetData.map((googleItem: any) => {
-        const localItem = localData.find((l: any) => l.id === googleItem.id);
-        return localItem ? { ...googleItem, ...localItem } : googleItem;
-      });
+      // Cache a copy of the Google Sheet data in local storage for offline use
+      localStorage.setItem('cached_google_indents_backup', JSON.stringify(googleSheetData));
 
       const userShopRaw = currentUser?.shopName || '';
       const allowedShops =
@@ -171,19 +174,32 @@ export const IMSDashboard = () => {
           : null;
 
       const filtered = allowedShops
-        ? mergedData.filter((i: any) => allowedShops.includes((i.shopName || '').trim().toLowerCase()))
-        : mergedData;
+        ? googleSheetData.filter((i: any) => allowedShops.includes((i.shopName || '').trim().toLowerCase()))
+        : googleSheetData;
 
       setIndents(filtered);
     } catch (err: any) {
       console.error('Error fetching indents:', err);
-      setError('Failed to load data. Showing cached data.');
-      const saved = localStorage.getItem('indent_approval_data');
-      setIndents(saved ? JSON.parse(saved) : []);
+      setError('Failed to sync live Google Sheet data. Showing cached offline data.');
+      
+      const cached = localStorage.getItem('cached_google_indents_backup');
+      const backupData = cached ? JSON.parse(cached) : [];
+
+      const userShopRaw = currentUser?.shopName || '';
+      const allowedShops =
+        userShopRaw && userShopRaw.toLowerCase() !== 'all'
+          ? userShopRaw.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+          : null;
+
+      const filtered = allowedShops
+        ? backupData.filter((i: any) => allowedShops.includes((i.shopName || '').trim().toLowerCase()))
+        : backupData;
+
+      setIndents(filtered);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => { fetchIndents(); }, [fetchIndents]);
 
@@ -219,12 +235,52 @@ export const IMSDashboard = () => {
     });
   }, [indents]);
 
+  // Dynamic filter lists for smart counts
+  const statusCounts = useMemo(() => {
+    const counts = {
+      All: groupedPOs.length,
+      Generated: 0,
+      Approved: 0,
+      'PO Sent': 0,
+      Dispatched: 0,
+      'In Transit': 0,
+      Accepted: 0,
+      Mismatch: 0,
+    };
+
+    groupedPOs.forEach((po) => {
+      const status = po.status;
+      if (status in counts) {
+        counts[status as keyof typeof counts] += 1;
+      }
+    });
+
+    return counts;
+  }, [groupedPOs]);
+
+  // Computed and filtered PO rows
+  const filteredPOs = useMemo(() => {
+    return groupedPOs.filter((po) => {
+      const searchLower = searchTerm.toLowerCase();
+      const matchesSearch =
+        po.indentNumber.toLowerCase().includes(searchLower) ||
+        po.partyName.toLowerCase().includes(searchLower) ||
+        po.poNumber.toLowerCase().includes(searchLower);
+
+      const matchesStatus =
+        statusFilter === 'All' ||
+        po.status.toLowerCase() === statusFilter.toLowerCase();
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [groupedPOs, searchTerm, statusFilter]);
+
   // Set default selected PO and Timeline Party if none is selected
   useEffect(() => {
-    if (groupedPOs.length > 0 && !selectedPO) {
-      setSelectedPO(groupedPOs[0].indentNumber);
+    if (filteredPOs.length > 0 && !selectedPO) {
+      setSelectedPO(filteredPOs[0].indentNumber);
     }
-  }, [groupedPOs, selectedPO]);
+  }, [filteredPOs, selectedPO]);
 
   const uniqueParties = useMemo(() => {
     const parties = new Set<string>();
@@ -268,7 +324,6 @@ export const IMSDashboard = () => {
     });
   };
 
-  // ── Pipeline step label colour ────────────────────────────────────
   const pipelineSteps = [
     { label: 'Generated', subLabel: 'Indent raised', count: pipeline.generated },
     { label: 'Approved',  subLabel: 'Purchase team',  count: pipeline.approved },
@@ -278,134 +333,353 @@ export const IMSDashboard = () => {
     { label: 'Accepted',  subLabel: 'Store confirmed',count: pipeline.accepted },
   ];
 
-  // ─────────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────────
   return (
-    <div className="p-4 md:p-8 bg-[#f9fafb] min-h-screen w-full font-sans">
+    <div className="p-4 md:p-8 bg-[#f8fafc] min-h-screen w-full font-sans antialiased text-slate-800">
+      
+      {/* Dynamic styling inject */}
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 6px;
+          height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #cbd5e1;
+          border-radius: 9999px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #94a3b8;
+        }
+        .animate-bounce-slow {
+          animation: bounce 2s infinite;
+        }
+        .animate-pulse-subtle {
+          animation: pulse 2.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes bounce {
+          0%, 100% { transform: translateY(-5%); animation-timing-function: cubic-bezier(0.8,0,1,1); }
+          50% { transform: none; animation-timing-function: cubic-bezier(0,0,0.2,1); }
+        }
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: .7; }
+        }
+      `}} />
 
-      {/* ── Header ── */}
+      {/* ── Top Header ── */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-900">Purchase Dashboard</h1>
-          <p className="text-slate-500 text-sm mt-1 flex items-center gap-2">
-            {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-slate-900">Purchase Dashboard</h1>
+            <div className="flex items-center px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold border border-emerald-200/50">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-ping"></span>
+              LIVE PORTAL
+            </div>
+          </div>
+          <p className="text-slate-500 text-sm mt-1.5 flex items-center gap-2">
+            <span className="font-semibold text-slate-600">
+              {new Date().toLocaleDateString('en-US', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+            </span>
             <span className="text-slate-300">•</span>
-            {currentUser?.shopName && currentUser.shopName.toLowerCase() !== 'all'
-              ? currentUser.shopName
-              : 'All Shops'}
+            <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-bold">
+              {currentUser?.shopName && currentUser.shopName.toLowerCase() !== 'all' ? currentUser.shopName : 'All Corporate Outlets'}
+            </span>
           </p>
         </div>
+        
         <div className="flex items-center gap-3">
           <button
             onClick={fetchIndents}
-            className="flex items-center gap-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200 px-4 py-2 rounded-xl hover:bg-slate-50 transition-all shadow-sm"
+            className="flex items-center gap-2 text-sm font-bold text-slate-700 bg-white border border-slate-200 px-4 py-2.5 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-all shadow-sm active:scale-95"
           >
-            <RefreshCw className="w-4 h-4" />
-            Refresh
+            <RefreshCw className="w-4 h-4 text-slate-500" />
+            Refresh Data
           </button>
-          <div className="flex items-center px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 mr-2 animate-pulse"></span>
-            LIVE
-          </div>
         </div>
       </div>
 
-      {/* ── Metric Cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      {/* ── High-End Metric Cards (Static) ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         {[
-          { title: 'Total POs',       val: metrics.totalPOs,       sub: 'Active indent groups',         color: 'text-slate-900',   icon: ShoppingCart, bg: 'bg-slate-50',   border: 'border-slate-100' },
-          { title: 'Pending Approval',val: metrics.pendingApproval,sub: 'Awaiting purchase team',        color: 'text-blue-600',    icon: Clock,        bg: 'bg-blue-50',    border: 'border-blue-100' },
-          { title: 'In Transit',      val: metrics.inTransit,      sub: 'Picked up by transporter',     color: 'text-indigo-600',  icon: Truck,        bg: 'bg-indigo-50',  border: 'border-indigo-100' },
-          { title: 'Mismatches',      val: metrics.mismatches,     sub: 'Qty discrepancy flagged',       color: 'text-rose-600',    icon: AlertTriangle,bg: 'bg-rose-50',    border: 'border-rose-100' },
+          { 
+            title: 'Total POs', 
+            val: metrics.totalPOs, 
+            sub: 'Active indent groups', 
+            theme: 'slate',
+            icon: ShoppingCart, 
+            gradient: 'from-slate-50 to-slate-100/50', 
+            border: 'border-slate-200 shadow-slate-100/40',
+            text: 'text-slate-950',
+            iconBg: 'bg-slate-200/70 text-slate-800',
+            glow: ''
+          },
+          { 
+            title: 'Pending Approval', 
+            val: metrics.pendingApproval, 
+            sub: 'Awaiting procurement action', 
+            theme: 'amber',
+            icon: Clock, 
+            gradient: 'from-amber-50/60 to-orange-50/20', 
+            border: 'border-amber-200/80 shadow-amber-100/20',
+            text: 'text-amber-700',
+            iconBg: 'bg-amber-100 text-amber-800',
+            glow: metrics.pendingApproval > 0 ? 'ring-2 ring-amber-400/40 ring-offset-2 animate-pulse-subtle' : ''
+          },
+          { 
+            title: 'In Transit', 
+            val: metrics.inTransit, 
+            sub: 'Active shipper liftoffs', 
+            theme: 'indigo',
+            icon: Truck, 
+            gradient: 'from-indigo-50/60 to-sky-50/20', 
+            border: 'border-indigo-200/80 shadow-indigo-100/20',
+            text: 'text-indigo-700',
+            iconBg: 'bg-indigo-100 text-indigo-800',
+            glow: metrics.inTransit > 0 ? 'animate-bounce-slow' : ''
+          },
+          { 
+            title: 'Discrepancy Alerts', 
+            val: metrics.mismatches, 
+            sub: 'Quantity variances flagged', 
+            theme: 'rose',
+            icon: AlertTriangle, 
+            gradient: metrics.mismatches > 0 ? 'from-rose-50 to-red-50/40' : 'from-slate-50 to-slate-100/50', 
+            border: metrics.mismatches > 0 ? 'border-rose-300 shadow-rose-100/40 ring-1 ring-red-400/10' : 'border-slate-200 shadow-slate-100/40',
+            text: metrics.mismatches > 0 ? 'text-rose-700 font-extrabold' : 'text-slate-600 font-semibold',
+            iconBg: metrics.mismatches > 0 ? 'bg-rose-100 text-rose-700 animate-pulse' : 'bg-slate-100 text-slate-400',
+            glow: metrics.mismatches > 0 ? 'ring-4 ring-rose-400/30' : ''
+          },
         ].map((c, i) => (
-          <div key={i} className={`${c.bg} border ${c.border} rounded-2xl p-5 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5`}>
-            <div className="flex justify-between items-start mb-3">
-              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{c.title}</p>
-              <c.icon className={`w-4 h-4 ${c.color}`} strokeWidth={1.5} />
+          <div 
+            key={i} 
+            className={`relative bg-gradient-to-br ${c.gradient} border ${c.border} rounded-2xl p-6 shadow-md hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 ${c.glow}`}
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{c.title}</p>
+                <div className={`text-4xl font-extrabold ${c.text} mt-2 tracking-tight`}>
+                  {loading ? '—' : c.val}
+                </div>
+              </div>
+              <div className={`p-3.5 rounded-xl ${c.iconBg} shadow-sm transition-transform duration-300 hover:scale-110`}>
+                <c.icon className="w-5 h-5" strokeWidth={2} />
+              </div>
             </div>
-            <div className={`text-3xl font-light ${c.color} mb-1`}>{c.val}</div>
-            <p className="text-[11px] text-slate-400">{c.sub}</p>
+            
+            <div className="flex items-center justify-between pt-3 border-t border-slate-200/50">
+              <p className="text-xs text-slate-400 font-semibold">{c.sub}</p>
+              {c.theme === 'rose' && !loading && c.val > 0 && (
+                <span className="flex h-2 w-2 relative">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500"></span>
+                </span>
+              )}
+              {c.theme === 'amber' && !loading && c.val > 0 && (
+                <span className="text-[10px] font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                  Attention Required
+                </span>
+              )}
+            </div>
           </div>
         ))}
       </div>
 
-      {/* ── Order Pipeline ── */}
-      <div className="mb-8">
-        <h2 className="text-[11px] font-bold text-slate-400 tracking-[0.15em] uppercase mb-4">Order Pipeline · Today</h2>
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-          <div className="flex flex-col lg:flex-row divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
-            {pipelineSteps.map((step, i) => (
-              <div key={i} className="flex-1 p-4 relative group hover:bg-slate-50 transition-colors">
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">{step.label}</div>
-                <div className="text-2xl font-light text-slate-900 mb-0.5">{loading ? '—' : step.count}</div>
-                <div className="text-[11px] text-slate-400">{step.subLabel}</div>
-                {i < pipelineSteps.length - 1 && (
-                  <div className="hidden lg:block absolute -right-2.5 top-1/2 -translate-y-1/2 z-10 bg-white border border-slate-100 rounded-full p-0.5">
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+      {/* ── Order Pipeline Stepper ── */}
+      <div className="mb-8 bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h2 className="text-xs font-bold text-slate-400 tracking-[0.18em] uppercase">Pipeline Progress Summary</h2>
+            <p className="text-xs text-slate-400 mt-1 font-medium">Flow status of all active purchases generated</p>
+          </div>
+          <span className="text-[10px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-full font-bold uppercase tracking-wider">
+            SaaS Flow Metrics
+          </span>
+        </div>
+        
+        {/* Pipeline horizontal bar */}
+        <div className="relative">
+          {/* Connecting Line (Only desktop) */}
+          <div className="hidden lg:block absolute top-[28px] left-[5%] right-[5%] h-[3px] bg-slate-100 -z-0" />
+          
+          <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-6 relative z-10">
+            {pipelineSteps.map((step, i) => {
+              let stepColor = 'bg-slate-200 border-slate-300 text-slate-500';
+              let numBg = 'bg-slate-100 border-slate-200 text-slate-500';
+              if (step.count > 0) {
+                if (step.label === 'Generated') {
+                  numBg = 'bg-blue-500 border-blue-600 text-white ring-4 ring-blue-50 shadow-blue-100';
+                } else if (step.label === 'Approved') {
+                  numBg = 'bg-amber-500 border-amber-600 text-white ring-4 ring-amber-50 shadow-amber-100';
+                } else if (step.label === 'Dispatched') {
+                  numBg = 'bg-teal-500 border-teal-600 text-white ring-4 ring-teal-50 shadow-teal-100';
+                } else if (step.label === 'Picked Up') {
+                  numBg = 'bg-indigo-500 border-indigo-600 text-white ring-4 ring-indigo-50 shadow-indigo-100';
+                } else if (step.label === 'Delivered') {
+                  numBg = 'bg-emerald-500 border-emerald-600 text-white ring-4 ring-emerald-50 shadow-emerald-100';
+                } else if (step.label === 'Accepted') {
+                  numBg = 'bg-green-600 border-green-700 text-white ring-4 ring-green-50 shadow-green-100';
+                }
+              }
+
+              return (
+                <div key={i} className="flex-1 flex flex-row lg:flex-col items-center gap-4 lg:gap-3 text-left lg:text-center group">
+                  {/* Circle Indicator */}
+                  <div className={`w-14 h-14 rounded-full flex items-center justify-center font-extrabold text-lg transition-all duration-300 border shadow-sm ${numBg}`}>
+                    {loading ? '—' : step.count}
                   </div>
-                )}
-              </div>
-            ))}
+                  
+                  {/* Labels */}
+                  <div className="flex flex-col lg:items-center">
+                    <span className={`text-xs font-black uppercase tracking-wider ${step.count > 0 ? 'text-slate-800' : 'text-slate-400'}`}>
+                      {step.label}
+                    </span>
+                    <span className="text-[11px] text-slate-400 mt-0.5 font-semibold">
+                      {step.subLabel}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* ── Live Orders — Grouped by PO ── */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-[11px] font-bold text-slate-400 tracking-[0.15em] uppercase">
-            Live Orders ({loading ? '…' : groupedPOs.length} POs)
-          </h2>
-          {!loading && (
-            <span className="text-[11px] text-slate-400">
-              Click a row to see items
-            </span>
-          )}
+      {/* ── Live Orders Section ── */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 mb-8">
+        
+        {/* Title, Search & Operations */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 pb-6 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-bold text-slate-800 tracking-tight">
+                Live Procurement Orders
+              </h2>
+              <span className="bg-indigo-50 text-indigo-700 text-xs font-extrabold px-3 py-1 rounded-full border border-indigo-100">
+                {loading ? '...' : filteredPOs.length} POs Displayed
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1 font-semibold">
+              Scan order status below. Top summary cards and pipeline remain locked for continuous operational metrics.
+            </p>
+          </div>
+          
+          {/* Quick Search */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="relative flex-1 sm:min-w-[320px]">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-slate-400" />
+              </div>
+              <input
+                type="text"
+                placeholder="Search Indent No, Party Name, PO..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="block w-full pl-10 pr-9 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 shadow-sm outline-none transition-all placeholder:text-slate-400 text-slate-700 focus:bg-white"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
-        {/* Loading */}
+        {/* Dynamic Horizontal Filter Bar */}
+        <div className="flex items-center gap-2.5 overflow-x-auto pb-4 scrollbar-hide -mx-2 px-2 mb-4 border-b border-slate-50">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-wider mr-2 flex items-center gap-1.5 flex-shrink-0">
+            <Filter className="w-3.5 h-3.5" />
+            Quick Status Filter:
+          </span>
+          {[
+            { id: 'All', label: 'All Orders', count: statusCounts.All, bg: 'bg-slate-100 text-slate-700 hover:bg-slate-200', activeBg: 'bg-slate-800 text-white' },
+            { id: 'Generated', label: 'Generated', count: statusCounts.Generated, bg: 'bg-blue-50 text-blue-700 hover:bg-blue-100', activeBg: 'bg-blue-600 text-white shadow-blue-100' },
+            { id: 'Approved', label: 'Approved', count: statusCounts.Approved, bg: 'bg-amber-50 text-amber-700 hover:bg-amber-100', activeBg: 'bg-amber-600 text-white shadow-amber-100' },
+            { id: 'PO Sent', label: 'PO Sent', count: statusCounts['PO Sent'], bg: 'bg-purple-50 text-purple-700 hover:bg-purple-100', activeBg: 'bg-purple-600 text-white shadow-purple-100' },
+            { id: 'Dispatched', label: 'Dispatched', count: statusCounts.Dispatched, bg: 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100', activeBg: 'bg-emerald-600 text-white shadow-emerald-100' },
+            { id: 'In Transit', label: 'In Transit', count: statusCounts['In Transit'], bg: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100', activeBg: 'bg-indigo-600 text-white shadow-indigo-100' },
+            { id: 'Accepted', label: 'Accepted', count: statusCounts.Accepted, bg: 'bg-green-50 text-green-700 hover:bg-green-100', activeBg: 'bg-green-600 text-white shadow-green-100' },
+            { id: 'Mismatch', label: 'Mismatch', count: statusCounts.Mismatch, bg: 'bg-rose-50 text-rose-700 hover:bg-rose-100', activeBg: 'bg-rose-600 text-white shadow-rose-100' },
+          ].map((pill) => (
+            <button
+              key={pill.id}
+              onClick={() => setStatusFilter(pill.id)}
+              className={`flex items-center gap-2.5 px-4 py-2 rounded-full text-xs font-bold transition-all border border-transparent whitespace-nowrap active:scale-95 shadow-sm ${
+                statusFilter === pill.id 
+                  ? pill.activeBg + ' shadow-md scale-105' 
+                  : pill.bg
+              }`}
+            >
+              {pill.label}
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                statusFilter === pill.id 
+                  ? 'bg-white/20 text-white' 
+                  : 'bg-white text-slate-800 border border-slate-200/50 shadow-sm'
+              }`}>
+                {pill.count}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* Loading Spinner */}
         {loading && (
-          <div className="flex items-center justify-center h-48 bg-white rounded-2xl border border-slate-100">
-            <div className="w-10 h-10 rounded-full border-2 border-slate-200 border-t-slate-800 animate-spin"></div>
+          <div className="flex flex-col items-center justify-center h-72 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+            <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin mb-3" />
+            <p className="text-sm text-slate-500 font-semibold">Syncing with Google Sheets...</p>
           </div>
         )}
 
-        {/* Error */}
+        {/* Error Notification */}
         {!loading && error && (
-          <div className="flex items-center gap-3 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-700 text-sm mb-4">
+          <div className="flex items-center gap-3 p-4 bg-rose-50 border border-rose-200 rounded-2xl text-rose-700 text-sm mb-4">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            {error}
+            <span className="font-semibold">{error}</span>
           </div>
         )}
 
-        {/* Empty */}
-        {!loading && groupedPOs.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-48 bg-white rounded-2xl border border-dashed border-slate-200 text-slate-400">
-            <Package className="w-10 h-10 mb-2" strokeWidth={1} />
-            <p className="text-sm font-medium">No orders found</p>
+        {/* Empty State */}
+        {!loading && filteredPOs.length === 0 && (
+          <div className="flex flex-col items-center justify-center h-72 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 text-slate-400">
+            <Package className="w-12 h-12 mb-3 text-slate-300" strokeWidth={1.5} />
+            <p className="text-sm font-bold text-slate-600">No active orders matched</p>
+            <p className="text-xs text-slate-400 mt-1 font-semibold">Try adjusting your filters or clearing search query.</p>
+            {(searchTerm || statusFilter !== 'All') && (
+              <button
+                onClick={() => { setSearchTerm(''); setStatusFilter('All'); }}
+                className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition shadow-md hover:shadow-indigo-100 active:scale-95"
+              >
+                Clear All Filters
+              </button>
+            )}
           </div>
         )}
 
-        {/* Table */}
-        {!loading && groupedPOs.length > 0 && (
-          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-            {/* Header */}
-            <div className="grid grid-cols-[1fr_1.5fr_auto_1fr_1fr_1fr] gap-x-4 px-5 py-3 bg-slate-50 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wide">
+        {/* ── LOCKED SCROLLER VIEWPORT WITH STICKY HEADERS ── */}
+        {!loading && filteredPOs.length > 0 && (
+          <div className="border border-slate-200 rounded-2xl shadow-sm overflow-hidden bg-slate-50/20 flex flex-col">
+            
+            {/* Table Header (Locked/Sticky inside scroller) */}
+            <div className="sticky top-0 z-20 grid grid-cols-[1.2fr_2fr_0.8fr_1.2fr_1.2fr_1.4fr] gap-x-4 px-6 py-4 bg-slate-100 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider shadow-sm">
               <div>Indent No.</div>
-              <div>Party</div>
+              <div>Party / Supplier Name</div>
               <div className="text-center">Items</div>
-              <div>Total Qty</div>
-              <div>Status</div>
-              <div>Last Event</div>
+              <div>Total Quantity</div>
+              <div>Stage Status</div>
+              <div>Last Tracked Event</div>
             </div>
 
-            {/* Rows */}
-            <div className="divide-y divide-slate-50">
-              {groupedPOs.map((po) => {
+            {/* Scrollable Rows Container (Locked height & scroll focus) */}
+            <div className="divide-y divide-slate-100 max-h-[520px] overflow-y-auto custom-scrollbar bg-white">
+              {filteredPOs.map((po) => {
                 const isOpen = expandedPOs.has(po.indentNumber);
 
-                // Group items by party within this PO (usually same party, but handle multiple)
+                // Group items by party within this PO
                 const byParty = po.items.reduce((acc: Record<string, any[]>, item: any) => {
                   const p = item.partyName || item.traderName || '—';
                   if (!acc[p]) acc[p] = [];
@@ -414,116 +688,120 @@ export const IMSDashboard = () => {
                 }, {});
 
                 return (
-                  <div key={po.indentNumber}>
-                    {/* PO Row */}
+                  <div key={po.indentNumber} className="transition-all duration-200">
+                    {/* PO Row Button */}
                     <button
                       onClick={() => {
                         toggleExpand(po.indentNumber);
                         setSelectedPO(po.indentNumber);
                       }}
-                      className={`w-full grid grid-cols-[1fr_1.5fr_auto_1fr_1fr_1fr] gap-x-4 px-5 py-4 text-left hover:bg-slate-50/70 transition-colors group ${
-                        selectedPO === po.indentNumber ? 'bg-slate-50/70 ring-1 ring-inset ring-slate-200' : ''
+                      className={`w-full grid grid-cols-[1.2fr_2fr_0.8fr_1.2fr_1.2fr_1.4fr] gap-x-4 px-6 py-4.5 text-left items-center hover:bg-slate-50/80 transition-all duration-200 group ${
+                        selectedPO === po.indentNumber 
+                          ? 'bg-indigo-50/30 ring-1 ring-inset ring-indigo-100/60' 
+                          : 'bg-white'
                       }`}
                     >
                       {/* Indent No */}
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className={`transition-transform flex-shrink-0 ${isOpen ? 'rotate-90' : ''}`}>
-                          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500" />
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className={`transition-transform duration-300 flex-shrink-0 ${isOpen ? 'rotate-90 text-indigo-600' : 'text-slate-400 group-hover:text-slate-600'}`}>
+                          <ChevronRight className="w-4 h-4" />
                         </span>
-                        <span className="font-mono text-sm font-medium text-slate-800 truncate">
+                        <span className="font-mono text-sm font-semibold text-slate-800 tracking-tight truncate">
                           {po.indentNumber}
                         </span>
                       </div>
 
                       {/* Party */}
-                      <div className="font-semibold text-sm text-slate-700 truncate self-center">
+                      <div className="font-bold text-sm text-slate-800 truncate pr-2">
                         {po.partyName}
                       </div>
 
                       {/* Items count */}
-                      <div className="text-center self-center">
-                        <span className="inline-block min-w-[28px] text-center bg-slate-100 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">
+                      <div className="text-center">
+                        <span className="inline-flex min-w-[28px] text-center bg-slate-100 text-slate-700 text-xs font-extrabold px-2.5 py-1 rounded-full border border-slate-200 shadow-sm">
                           {po.items.length}
                         </span>
                       </div>
 
                       {/* Qty */}
-                      <div className="self-center">
-                        <span className="text-sm font-mono text-slate-700">
+                      <div>
+                        <div className="text-sm font-bold text-slate-800 font-mono">
                           {po.totalQtyBox > 0
                             ? `${po.totalQtyBox} Box`
                             : `${po.totalQtyPcs} Pcs`}
-                        </span>
+                        </div>
                         {po.totalQtyBox > 0 && po.totalQtyPcs > 0 && (
-                          <span className="text-[11px] text-slate-400 ml-1">({po.totalQtyPcs} pcs)</span>
+                          <div className="text-[10px] font-medium text-slate-400 mt-0.5">({po.totalQtyPcs} pcs)</div>
                         )}
                       </div>
 
-                      {/* Status */}
-                      <div className="self-center">
-                        <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold ${po.statusClass}`}>
+                      {/* Status Badge */}
+                      <div>
+                        <span className={`inline-flex px-3 py-1 rounded-full text-xs font-extrabold tracking-wide shadow-sm border ${po.statusClass}`}>
                           {po.status}
                         </span>
                       </div>
 
                       {/* Last Event */}
-                      <div className="self-center text-xs text-slate-400 truncate">
+                      <div className="text-xs text-slate-500 truncate font-semibold">
                         {po.lastEvent || '—'}
                       </div>
                     </button>
 
                     {/* ── Expanded: Items grouped by Party ── */}
                     {isOpen && (
-                      <div className="bg-slate-50/50 border-t border-slate-100 px-5 pb-4 pt-3">
+                      <div className="bg-slate-50/50 border-t border-b border-slate-100 px-6 py-5 space-y-4 shadow-inner">
                         {Object.entries(byParty).map(([partyName, partyItems]: [string, any[]]) => (
-                          <div key={partyName} className="mb-4 last:mb-0">
-                            {/* Party Header */}
-                            <div className="flex items-center gap-2 mb-2">
-                              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400"></div>
-                              <span className="text-xs font-bold text-slate-600 uppercase tracking-wide">
-                                {partyName}
-                              </span>
-                              <span className="text-[11px] text-slate-400">
-                                · {partyItems.length} item{partyItems.length !== 1 ? 's' : ''}
-                              </span>
+                          <div key={partyName} className="space-y-2">
+                            {/* Party Sub-Header */}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></div>
+                                <span className="text-xs font-black text-slate-600 uppercase tracking-wider">
+                                  {partyName}
+                                </span>
+                                <span className="text-[10px] text-slate-400 font-semibold">
+                                  ({partyItems.length} granular item{partyItems.length !== 1 ? 's' : ''})
+                                </span>
+                              </div>
                             </div>
 
                             {/* Items Table */}
-                            <div className="bg-white rounded-xl border border-slate-100 overflow-hidden shadow-sm">
-                              <table className="w-full text-left text-xs">
+                            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                              <table className="w-full text-left text-xs border-collapse">
                                 <thead>
-                                  <tr className="bg-slate-50 text-slate-400 font-semibold border-b border-slate-100">
-                                    <th className="px-4 py-2.5">Item Name</th>
-                                    <th className="px-4 py-2.5">Brand</th>
-                                    <th className="px-4 py-2.5 text-center">Size</th>
-                                    <th className="px-4 py-2.5 text-center">Qty (Pcs)</th>
-                                    <th className="px-4 py-2.5 text-center">Qty (Box)</th>
-                                    <th className="px-4 py-2.5 text-center">Closing Stock</th>
+                                  <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                                    <th className="px-5 py-3">Item Description</th>
+                                    <th className="px-5 py-3">Brand Range</th>
+                                    <th className="px-5 py-3 text-center">Pack Size</th>
+                                    <th className="px-5 py-3 text-center">Qty (Pcs)</th>
+                                    <th className="px-5 py-3 text-center">Qty (Box)</th>
+                                    <th className="px-5 py-3 text-center">Current Closing Stock</th>
                                   </tr>
                                 </thead>
-                                <tbody className="divide-y divide-slate-50">
+                                <tbody className="divide-y divide-slate-100">
                                   {(partyItems as any[]).map((item: any, idx: number) => (
-                                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
-                                      <td className="px-4 py-2.5 font-medium text-slate-800 max-w-[200px] truncate">
+                                    <tr key={idx} className="hover:bg-slate-50/30 transition-colors">
+                                      <td className="px-5 py-3.5 font-bold text-slate-800 max-w-[240px] truncate">
                                         {item.itemName || item.brandName || '—'}
                                       </td>
-                                      <td className="px-4 py-2.5 text-slate-500">
+                                      <td className="px-5 py-3.5 text-slate-500 font-semibold">
                                         {item.brandName || '—'}
                                       </td>
-                                      <td className="px-4 py-2.5 text-center text-slate-500">
+                                      <td className="px-5 py-3.5 text-center text-slate-600 font-semibold">
                                         {item.sizeML ? `${item.sizeML} ml` : item.size || '—'}
                                       </td>
-                                      <td className="px-4 py-2.5 text-center font-mono font-semibold text-slate-700">
+                                      <td className="px-5 py-3.5 text-center font-mono font-bold text-indigo-700">
                                         {item.reorderQuantityPcs || 0}
                                       </td>
-                                      <td className="px-4 py-2.5 text-center font-mono text-slate-500">
+                                      <td className="px-5 py-3.5 text-center font-mono text-slate-500">
                                         {item.reorderQuantityBox || '—'}
                                       </td>
-                                      <td className="px-4 py-2.5 text-center">
-                                        <span className={`font-mono text-xs ${
+                                      <td className="px-5 py-3.5 text-center">
+                                        <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md ${
                                           Number(item.closingStockBottle || item.closingStock || 0) <= Number(item.moq || 0)
-                                            ? 'text-rose-600 font-bold'
-                                            : 'text-slate-500'
+                                            ? 'bg-rose-50 text-rose-600 border border-rose-100 shadow-sm font-extrabold'
+                                            : 'bg-slate-50 text-slate-500 border border-slate-200/50'
                                         }`}>
                                           {item.closingStockBottle || item.closingStock || 0}
                                         </span>
@@ -531,16 +809,16 @@ export const IMSDashboard = () => {
                                     </tr>
                                   ))}
                                 </tbody>
-                                {/* Party subtotal */}
+                                {/* Subtotal Footer */}
                                 <tfoot>
-                                  <tr className="bg-slate-50 border-t border-slate-100">
-                                    <td colSpan={3} className="px-4 py-2 text-[11px] font-bold text-slate-400 uppercase">
-                                      Party Total
+                                  <tr className="bg-slate-50 border-t border-slate-200">
+                                    <td colSpan={3} className="px-5 py-2.5 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">
+                                      Party Cumulative Summary
                                     </td>
-                                    <td className="px-4 py-2 text-center font-mono font-bold text-slate-700 text-xs">
+                                    <td className="px-5 py-2.5 text-center font-mono font-extrabold text-indigo-800 text-xs">
                                       {(partyItems as any[]).reduce((s: number, i: any) => s + Number(i.reorderQuantityPcs || 0), 0)}
                                     </td>
-                                    <td className="px-4 py-2 text-center font-mono font-bold text-slate-700 text-xs">
+                                    <td className="px-5 py-2.5 text-center font-mono font-extrabold text-slate-700 text-xs">
                                       {(partyItems as any[]).reduce((s: number, i: any) => s + Number(i.reorderQuantityBox || 0), 0) || '—'}
                                     </td>
                                     <td></td>
@@ -564,15 +842,19 @@ export const IMSDashboard = () => {
       {!loading && indents.length > 0 && (
         <div className="mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
-            <h2 className="text-[11px] font-bold text-slate-400 tracking-[0.15em] uppercase">
-              EVENT TIMELINES BY PARTY
-            </h2>
+            <div>
+              <h2 className="text-xs font-bold text-slate-400 tracking-[0.18em] uppercase">
+                Interactive Event Timelines by Party
+              </h2>
+              <p className="text-xs text-slate-400 mt-1 font-semibold">Select a supplier below to audit their lifecycle history</p>
+            </div>
+            
             <div className="flex items-center gap-2">
-              <label className="text-xs font-semibold text-slate-500 uppercase">Select Party:</label>
+              <label className="text-xs font-bold text-slate-500 uppercase">Select Supplier:</label>
               <select 
                 value={selectedTimelineParty}
                 onChange={(e) => setSelectedTimelineParty(e.target.value)}
-                className="bg-white border border-slate-200 text-slate-700 text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block px-3 py-1.5 shadow-sm font-medium outline-none"
+                className="bg-white border border-slate-200 text-slate-700 text-sm rounded-xl focus:ring-indigo-500 focus:border-indigo-500 block px-3 py-2 shadow-sm font-semibold outline-none"
               >
                 {uniqueParties.map((party) => (
                   <option key={party} value={party}>{party}</option>
@@ -583,10 +865,7 @@ export const IMSDashboard = () => {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {(() => {
-              // Find all indents for the selected party
               const partyIndents = indents.filter(i => (i.partyName || i.traderName) === selectedTimelineParty);
-              
-              // Group these indents by PO Number
               const posForParty = partyIndents.reduce((acc: Record<string, any[]>, item: any) => {
                 const poNum = item.indentNumber || item.poNumber || 'Unknown PO';
                 if (!acc[poNum]) acc[poNum] = [];
@@ -603,25 +882,30 @@ export const IMSDashboard = () => {
               }
 
               return Object.entries(posForParty).map(([poNumber, items]) => (
-                <div key={poNumber} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-                  <div className="flex items-center gap-2 mb-6">
-                    <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">{poNumber}</h3>
-                    <span className="text-xs text-slate-400 ml-auto bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                      {(items as any[]).length} items
+                <div key={poNumber} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 hover:shadow-md transition-all">
+                  <div className="flex items-center gap-2.5 mb-6">
+                    <div className="w-2.5 h-2.5 rounded-full bg-indigo-600 animate-ping"></div>
+                    <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">{poNumber}</h3>
+                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100/50 px-2.5 py-1 rounded-md ml-auto">
+                      {(items as any[]).length} Products Enlisted
                     </span>
                   </div>
                   
-                  <div className="relative border-l border-slate-200 ml-3 space-y-6">
+                  <div className="relative border-l-2 border-slate-100 ml-3 space-y-6">
                     {generateTimeline(items as any[]).map((ev, idx) => (
                       <div key={idx} className="relative pl-6 group">
-                        <div className={`absolute w-3 h-3 ${ev.color} rounded-full -left-[6.5px] top-1.5 ring-4 ring-white shadow-sm transition-transform group-hover:scale-125`}></div>
-                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-1">
+                        {/* Timeline Dot */}
+                        <div className={`absolute w-3 h-3 ${ev.color} rounded-full -left-[7px] top-1.5 ring-4 ring-white shadow-sm transition-transform duration-300 group-hover:scale-125`}></div>
+                        
+                        {/* Event Details */}
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
                           <div>
-                            <h3 className="text-sm font-bold text-slate-900">{ev.title}</h3>
-                            <p className="text-xs text-slate-500 mt-0.5">{ev.desc}</p>
+                            <h4 className="text-sm font-bold text-slate-800">{ev.title}</h4>
+                            <p className="text-xs text-slate-400 mt-0.5 font-semibold">{ev.desc}</p>
                           </div>
-                          <div className="text-[11px] font-mono text-slate-400 font-medium bg-slate-50 px-2 py-0.5 rounded-md mt-1 sm:mt-0">{ev.time}</div>
+                          <div className="text-[10px] font-bold font-mono text-slate-400 bg-slate-50 border border-slate-200/50 px-2 py-0.5 rounded-md mt-1 sm:mt-0 flex-shrink-0 self-start">
+                            {ev.time}
+                          </div>
                         </div>
                       </div>
                     ))}
