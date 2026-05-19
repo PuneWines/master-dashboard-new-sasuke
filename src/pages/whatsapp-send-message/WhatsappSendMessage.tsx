@@ -83,7 +83,7 @@ async function requestGAS(params: Record<string, any>, method: 'GET' | 'POST' = 
         if (firstChar !== '{' && firstChar !== '[' && firstChar !== '"') {
             console.error("[WhatsappSendMessage] ❌ GAS returned non-JSON:", text.substring(0, 120));
             throw new Error(
-                text.trimStart().startsWith('<') 
+                text.trimStart().startsWith('<')
                     ? 'GAS returned HTML — check deployment access is set to \'Anyone\'.'
                     : 'GAS script error — please update and redeploy the Master Login script.'
             );
@@ -229,7 +229,7 @@ const WhatsappSendMessage: React.FC = () => {
         setIsLoadingShops(true);
         setStatus({ message: '', type: '' });
         try {
-            const data = await requestGAS({ action: 'getShopNames' }, 'GET');
+            const data = await requestGAS({ action: 'getShopNames', callback: 'jsonp_cb' }, 'GET');
             setShopNames(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load shops: ${err.message}`, type: 'error' });
@@ -276,7 +276,7 @@ const WhatsappSendMessage: React.FC = () => {
 
         setIsLoadingContacts(true);
         try {
-            const data = await requestGAS({ action: 'getContactsByShop', shopName: shop }, 'POST');
+            const data = await requestGAS({ action: 'getContactsByShop', shopName: shop, callback: 'jsonp_cb' }, 'GET');
             setContacts(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load contacts: ${err.message}`, type: 'error' });
@@ -729,10 +729,20 @@ const WhatsappSendMessage: React.FC = () => {
                                     <tbody className="divide-y divide-gray-50">
                                         {contacts.length === 0 ? (
                                             <tr>
-                                                <td colSpan={4} className="p-8 text-center text-gray-400 italic">
-                                                    {isLoadingContacts ? '⏳ Loading contacts...'
-                                                        : selectedShop ? 'No contacts found for this shop.'
-                                                            : 'Please select a shop first...'}
+                                                <td colSpan={4} className="p-8 text-center text-gray-400">
+                                                    {isLoadingContacts ? (
+                                                        <div className="flex flex-col items-center justify-center space-y-3 py-4">
+                                                            <svg className="animate-spin h-8 w-8 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                            </svg>
+                                                            <span className="text-sm font-medium text-gray-500 animate-pulse">Loading contacts...</span>
+                                                        </div>
+                                                    ) : selectedShop ? (
+                                                        <span className="italic">No contacts found for this shop.</span>
+                                                    ) : (
+                                                        <span className="italic">Please select a shop first...</span>
+                                                    )}
                                                 </td>
                                             </tr>
                                         ) : contacts.map((row, i) => {
