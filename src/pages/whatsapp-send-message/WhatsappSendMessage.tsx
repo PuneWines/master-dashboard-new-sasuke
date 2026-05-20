@@ -294,8 +294,12 @@ const WhatsappSendMessage: React.FC = () => {
                 );
                 const results = await Promise.all(promises);
                 const allContacts: any[][] = [];
-                results.forEach((shopContacts) => {
-                    allContacts.push(...shopContacts);
+                results.forEach((shopContacts, idx) => {
+                    const shopName = currentShops[idx];
+                    if (Array.isArray(shopContacts)) {
+                        const mapped = shopContacts.map(contact => [...contact, shopName]);
+                        allContacts.push(...mapped);
+                    }
                 });
                 data = allContacts;
             } else {
@@ -532,6 +536,9 @@ const WhatsappSendMessage: React.FC = () => {
             .map(r => r.shopName)
             .filter(Boolean)
     )).sort();
+
+    const showShopNameColumn = selectedShop === 'All Shop';
+    const showStatusColumn = sendResults.length > 0;
 
     // ─── Render ───────────────────────────────────────────────────────────────
     return (
@@ -770,13 +777,18 @@ const WhatsappSendMessage: React.FC = () => {
                                             </th>
                                             <th className="p-3 text-left border-b border-green-100 font-bold text-sm">Name</th>
                                             <th className="p-3 text-left border-b border-green-100 font-bold text-sm">Number</th>
-                                            <th className="p-3 text-left border-b border-green-100 font-bold text-sm w-24">Status</th>
+                                            {showShopNameColumn && (
+                                                <th className="p-3 text-left border-b border-green-100 font-bold text-sm">Shop Name</th>
+                                            )}
+                                            {showStatusColumn && (
+                                                <th className="p-3 text-left border-b border-green-100 font-bold text-sm w-24">Status</th>
+                                            )}
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-50">
                                         {contacts.length === 0 ? (
                                             <tr>
-                                                <td colSpan={4} className="p-8 text-center text-gray-400">
+                                                <td colSpan={3 + (showShopNameColumn ? 1 : 0) + (showStatusColumn ? 1 : 0)} className="p-8 text-center text-gray-400">
                                                     {isLoadingContacts ? (
                                                         <div className="flex flex-col items-center justify-center space-y-3 py-4">
                                                             <svg className="animate-spin h-8 w-8 text-green-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -803,11 +815,16 @@ const WhatsappSendMessage: React.FC = () => {
                                                     </td>
                                                     <td className="p-3 text-sm text-gray-700 font-medium">{row[1]}</td>
                                                     <td className="p-3 text-sm text-gray-500 font-mono">{row[2]}</td>
-                                                    <td className="p-3 text-xs font-semibold">
-                                                        {result?.status === 'Sent' && <span className="text-green-600">✅ Sent</span>}
-                                                        {result?.status === 'Failed' && <span className="text-red-500" title={result.error}>❌ Failed</span>}
-                                                        {result?.status === 'Sending' && <span className="text-blue-500">⏳ Sending</span>}
-                                                    </td>
+                                                    {showShopNameColumn && (
+                                                        <td className="p-3 text-sm text-gray-700 font-semibold">{row[3]}</td>
+                                                    )}
+                                                    {showStatusColumn && (
+                                                        <td className="p-3 text-xs font-semibold">
+                                                            {result?.status === 'Sent' && <span className="text-green-600">✅ Sent</span>}
+                                                            {result?.status === 'Failed' && <span className="text-red-500" title={result.error}>❌ Failed</span>}
+                                                            {result?.status === 'Sending' && <span className="text-blue-500">⏳ Sending</span>}
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             );
                                         })}
