@@ -276,7 +276,31 @@ const WhatsappSendMessage: React.FC = () => {
 
         setIsLoadingContacts(true);
         try {
-            const data = await requestGAS({ action: 'getContactsByShop', shopName: shop, callback: 'jsonp_cb' }, 'GET');
+            let data;
+            if (shop === 'All Shop') {
+                let currentShops = shopNames;
+                if (currentShops.length === 0) {
+                    const shopData = await requestGAS({ action: 'getShopNames', callback: 'jsonp_cb' }, 'GET');
+                    currentShops = Array.isArray(shopData) ? shopData : [];
+                    setShopNames(currentShops);
+                }
+                const promises = currentShops.map(s =>
+                    requestGAS({ action: 'getContactsByShop', shopName: s, callback: 'jsonp_cb' }, 'GET')
+                        .then(resData => (Array.isArray(resData) ? resData : []))
+                        .catch(err => {
+                            console.error(`Failed to fetch contacts for shop ${s}:`, err);
+                            return [];
+                        })
+                );
+                const results = await Promise.all(promises);
+                const allContacts: any[][] = [];
+                results.forEach((shopContacts) => {
+                    allContacts.push(...shopContacts);
+                });
+                data = allContacts;
+            } else {
+                data = await requestGAS({ action: 'getContactsByShop', shopName: shop, callback: 'jsonp_cb' }, 'GET');
+            }
             setContacts(Array.isArray(data) ? data : []);
         } catch (err: any) {
             setStatus({ message: `⚠️ Could not load contacts: ${err.message}`, type: 'error' });
@@ -483,8 +507,9 @@ const WhatsappSendMessage: React.FC = () => {
             setIsModalOpen(false);
             setNewContact({ shopName: '', name: '', number: '', isNewShop: false, newShopName: '' });
             await fetchShopNames();
-            if (selectedShop === shop)
-                await handleShopChange({ target: { value: shop } } as ChangeEvent<HTMLSelectElement>);
+            if (selectedShop === 'All Shop' || selectedShop === shop) {
+                await handleShopChange({ target: { value: selectedShop } } as ChangeEvent<HTMLSelectElement>);
+            }
             setTimeout(() => setStatus({ message: '', type: '' }), 3000);
         } catch (err: any) {
             setStatus({ message: `❌ ${err.message}`, type: 'error' });
@@ -692,8 +717,18 @@ const WhatsappSendMessage: React.FC = () => {
 
                         {/* Shop Dropdown */}
                         <div className="space-y-2">
-                            <label className="block font-bold text-gray-700 text-sm">
-                                🏪 Shop Name{isLoadingShops && <span className="text-green-500 font-normal ml-2">(Loading...)</span>}
+                            <label className="block font-bold text-gray-700 text-sm flex items-center gap-2">
+                                🏪 Shop Name
+                                {isLoadingShops && <span className="text-green-500 font-normal text-xs">(Loading...)</span>}
+                                {isLoadingContacts && (
+                                    <span className="flex items-center gap-1 text-green-600 font-normal text-xs animate-pulse">
+                                        <svg className="animate-spin h-3.5 w-3.5 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        Updating records...
+                                    </span>
+                                )}
                             </label>
                             <select
                                 className="w-full p-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-green-400 outline-none cursor-pointer bg-white text-gray-700 shadow-sm"
@@ -701,6 +736,7 @@ const WhatsappSendMessage: React.FC = () => {
                                 onChange={handleShopChange}
                             >
                                 <option value="">-- Select Shop First --</option>
+                                <option value="All Shop">All Shop</option>
                                 {shopNames.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
                             {shopNames.length === 0 && !isLoadingShops && (
@@ -711,7 +747,18 @@ const WhatsappSendMessage: React.FC = () => {
                         </div>
 
                         {/* Contacts Table */}
-                        <div className="border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                        <div className="relative border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+                            {isLoadingContacts && (
+                                <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px] flex items-center justify-center z-20">
+                                    <div className="flex flex-col items-center gap-2">
+                                        <svg className="animate-spin h-10 w-10 text-green-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                        </svg>
+                                        <span className="text-sm font-semibold text-gray-700 animate-pulse">Updating records...</span>
+                                    </div>
+                                </div>
+                            )}
                             <div className="max-h-[280px] overflow-y-auto">
                                 <table className="w-full border-collapse">
                                     <thead className="sticky top-0 bg-green-50 text-green-700 z-10">
